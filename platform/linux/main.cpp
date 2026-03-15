@@ -32,7 +32,12 @@
  * Forward declarations for backend namespaces
  * ========================================================================= */
 namespace GfxBackend   { bool Init(int w, int h); void Shutdown(); bool PollEvents(); void StubFrame(unsigned long frameCount); }
+#if HAVE_SDL2_MIXER
 namespace AudioBackend { bool Init(int freq);      void Shutdown(); }
+#else
+namespace AudioBackend { inline bool Init(int)  { return false; }
+                         inline void Shutdown() {} }
+#endif
 namespace InputBackend { void Init(); void Shutdown(); bool ProcessEvent(const SDL_Event *ev); }
 namespace AssetLoader  { bool Init(const char *rom); void Shutdown(); }
 namespace SaveFile     { void Init(); }
