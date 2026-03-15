@@ -50,71 +50,6 @@ static OSViMode *sCurrentMode  = nullptr;
 /* =========================================================================
  * Init / Shutdown
  * ========================================================================= */
-/*
- * GL profile attempts – try Core 3.3 first, then fall back to progressively
- * lower requirements.  Some Mesa / Intel drivers segfault or fail when asked
- * for a Core profile they don't support.
- */
-struct GLProfile {
-    int major, minor;
-    int profile; /* SDL_GL_CONTEXT_PROFILE_CORE or _COMPATIBILITY or 0 */
-    const char *name;
-};
-
-static const GLProfile sGLProfiles[] = {
-    { 3, 3, SDL_GL_CONTEXT_PROFILE_CORE,          "OpenGL 3.3 Core" },
-    { 3, 1, SDL_GL_CONTEXT_PROFILE_CORE,          "OpenGL 3.1 Core" },
-    { 3, 0, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY,  "OpenGL 3.0 Compat" },
-    { 2, 1, 0,                                     "OpenGL 2.1 (default)" },
-};
-
-static bool try_create_window_and_context(int width, int height, const GLProfile &prof) {
-    SDL_GL_ResetAttributes();
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-
-    if (prof.major >= 3) {
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, prof.major);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, prof.minor);
-        if (prof.profile)
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, prof.profile);
-    }
-    /* For GL 2.1 we just leave the defaults – no explicit version request,
-     * which lets the driver pick whatever it supports. */
-
-    fprintf(stderr, "[gfx]   Trying %s...\n", prof.name);
-
-    sWindow = SDL_CreateWindow(
-        "Aidyn Chronicles: The First Mage",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
-    if (!sWindow) {
-        fprintf(stderr, "[gfx]     SDL_CreateWindow failed: %s\n", SDL_GetError());
-        return false;
-    }
-
-    sGLCtx = SDL_GL_CreateContext(sWindow);
-    if (!sGLCtx) {
-        fprintf(stderr, "[gfx]     SDL_GL_CreateContext failed: %s\n", SDL_GetError());
-        SDL_DestroyWindow(sWindow);
-        sWindow = nullptr;
-        return false;
-    }
-
-    if (SDL_GL_MakeCurrent(sWindow, sGLCtx) != 0) {
-        fprintf(stderr, "[gfx]     SDL_GL_MakeCurrent failed: %s\n", SDL_GetError());
-        SDL_GL_DeleteContext(sGLCtx);
-        SDL_DestroyWindow(sWindow);
-        sGLCtx  = nullptr;
-        sWindow = nullptr;
-        return false;
-    }
-
-    fprintf(stderr, "[gfx]     Success: %s\n", prof.name);
-    return true;
-}
-
 bool Init(int width, int height) {
     sWidth  = width;
     sHeight = height;
@@ -130,16 +65,47 @@ bool Init(int width, int height) {
     fprintf(stderr, "[gfx]   SDL initialised OK\n");
     fprintf(stderr, "[gfx]   Video driver: %s\n", SDL_GetCurrentVideoDriver());
 
-    /* ---- Window + GL context with fallback ---- */
-    bool ok = false;
-    for (const auto &prof : sGLProfiles) {
-        ok = try_create_window_and_context(width, height, prof);
-        if (ok) break;
-    }
-    if (!ok) {
-        fprintf(stderr, "[gfx] FATAL: Could not create a window with any GL profile.\n");
+    /* ---- Create window ----
+     * Do NOT request a specific GL version via SDL_GL_SetAttribute before
+     * SDL_CreateWindow.  Some drivers (Mesa llvmpipe, older Intel, etc.)
+     * segfault inside SDL_CreateWindow when a Core profile they don't
+     * support is requested.  Instead we let the driver pick its default
+     * and check what we got afterwards. */
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
+    fprintf(stderr, "[gfx] SDL_CreateWindow(%dx%d)...\n", width, height);
+
+    sWindow = SDL_CreateWindow(
+        "Aidyn Chronicles: The First Mage",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    if (!sWindow) {
+        fprintf(stderr, "[gfx] FATAL: SDL_CreateWindow failed: %s\n", SDL_GetError());
         fprintf(stderr, "[gfx]   Hint: try SDL_VIDEODRIVER=x11 or =wayland\n");
+        SDL_Quit();
+        return false;
+    }
+    fprintf(stderr, "[gfx]   Window created OK\n");
+
+    /* ---- GL context ---- */
+    fprintf(stderr, "[gfx] SDL_GL_CreateContext...\n");
+    sGLCtx = SDL_GL_CreateContext(sWindow);
+    if (!sGLCtx) {
+        fprintf(stderr, "[gfx] FATAL: SDL_GL_CreateContext failed: %s\n", SDL_GetError());
         fprintf(stderr, "[gfx]   Hint: check that your GPU supports at least OpenGL 2.1\n");
+        SDL_DestroyWindow(sWindow);
+        sWindow = nullptr;
+        SDL_Quit();
+        return false;
+    }
+
+    if (SDL_GL_MakeCurrent(sWindow, sGLCtx) != 0) {
+        fprintf(stderr, "[gfx] FATAL: SDL_GL_MakeCurrent failed: %s\n", SDL_GetError());
+        SDL_GL_DeleteContext(sGLCtx);
+        SDL_DestroyWindow(sWindow);
+        sGLCtx  = nullptr;
+        sWindow = nullptr;
         SDL_Quit();
         return false;
     }
