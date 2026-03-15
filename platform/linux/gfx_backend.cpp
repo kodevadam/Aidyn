@@ -50,59 +50,96 @@ static OSViMode *sCurrentMode  = nullptr;
 /* =========================================================================
  * Init / Shutdown
  * ========================================================================= */
+/*
+ * GL profile attempts – try Core 3.3 first, then fall back to progressively
+ * lower requirements.  Some Mesa / Intel drivers segfault or fail when asked
+ * for a Core profile they don't support.
+ */
+struct GLProfile {
+    int major, minor;
+    int profile; /* SDL_GL_CONTEXT_PROFILE_CORE or _COMPATIBILITY or 0 */
+    const char *name;
+};
+
+static const GLProfile sGLProfiles[] = {
+    { 3, 3, SDL_GL_CONTEXT_PROFILE_CORE,          "OpenGL 3.3 Core" },
+    { 3, 1, SDL_GL_CONTEXT_PROFILE_CORE,          "OpenGL 3.1 Core" },
+    { 3, 0, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY,  "OpenGL 3.0 Compat" },
+    { 2, 1, 0,                                     "OpenGL 2.1 (default)" },
+};
+
+static bool try_create_window_and_context(int width, int height, const GLProfile &prof) {
+    SDL_GL_ResetAttributes();
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
+
+    if (prof.major >= 3) {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, prof.major);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, prof.minor);
+        if (prof.profile)
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, prof.profile);
+    }
+    /* For GL 2.1 we just leave the defaults – no explicit version request,
+     * which lets the driver pick whatever it supports. */
+
+    fprintf(stderr, "[gfx]   Trying %s...\n", prof.name);
+
+    sWindow = SDL_CreateWindow(
+        "Aidyn Chronicles: The First Mage",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    if (!sWindow) {
+        fprintf(stderr, "[gfx]     SDL_CreateWindow failed: %s\n", SDL_GetError());
+        return false;
+    }
+
+    sGLCtx = SDL_GL_CreateContext(sWindow);
+    if (!sGLCtx) {
+        fprintf(stderr, "[gfx]     SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(sWindow);
+        sWindow = nullptr;
+        return false;
+    }
+
+    if (SDL_GL_MakeCurrent(sWindow, sGLCtx) != 0) {
+        fprintf(stderr, "[gfx]     SDL_GL_MakeCurrent failed: %s\n", SDL_GetError());
+        SDL_GL_DeleteContext(sGLCtx);
+        SDL_DestroyWindow(sWindow);
+        sGLCtx  = nullptr;
+        sWindow = nullptr;
+        return false;
+    }
+
+    fprintf(stderr, "[gfx]     Success: %s\n", prof.name);
+    return true;
+}
+
 bool Init(int width, int height) {
     sWidth  = width;
     sHeight = height;
 
-    /* ---- SDL_Init ---- */
-    fprintf(stderr, "[gfx] SDL_Init(VIDEO | GAMECONTROLLER | AUDIO)...\n");
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0) {
+    /* ---- SDL_Init ----
+     * Only init VIDEO here.  Audio and gamecontroller subsystems are
+     * initialised later by main.cpp so that --no-audio can skip them. */
+    fprintf(stderr, "[gfx] SDL_Init(VIDEO)...\n");
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "[gfx] FATAL: SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
     fprintf(stderr, "[gfx]   SDL initialised OK\n");
     fprintf(stderr, "[gfx]   Video driver: %s\n", SDL_GetCurrentVideoDriver());
 
-    /* ---- GL attributes ---- */
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-    fprintf(stderr, "[gfx]   Requested: OpenGL 3.3 Core, double-buffered, depth=16\n");
-
-    /* ---- Window ---- */
-    fprintf(stderr, "[gfx] SDL_CreateWindow(%dx%d)...\n", width, height);
-    sWindow = SDL_CreateWindow(
-        "Aidyn Chronicles: The First Mage",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    if (!sWindow) {
-        fprintf(stderr, "[gfx] FATAL: SDL_CreateWindow failed: %s\n", SDL_GetError());
-        SDL_Quit();
-        return false;
+    /* ---- Window + GL context with fallback ---- */
+    bool ok = false;
+    for (const auto &prof : sGLProfiles) {
+        ok = try_create_window_and_context(width, height, prof);
+        if (ok) break;
     }
-    fprintf(stderr, "[gfx]   Window created OK\n");
-
-    /* ---- GL context ---- */
-    fprintf(stderr, "[gfx] SDL_GL_CreateContext...\n");
-    sGLCtx = SDL_GL_CreateContext(sWindow);
-    if (!sGLCtx) {
-        fprintf(stderr, "[gfx] FATAL: SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+    if (!ok) {
+        fprintf(stderr, "[gfx] FATAL: Could not create a window with any GL profile.\n");
         fprintf(stderr, "[gfx]   Hint: try SDL_VIDEODRIVER=x11 or =wayland\n");
-        fprintf(stderr, "[gfx]   Hint: check that your GPU supports OpenGL 3.3\n");
-        SDL_DestroyWindow(sWindow);
-        SDL_Quit();
-        return false;
-    }
-    fprintf(stderr, "[gfx]   GL context created OK\n");
-
-    /* ---- Make current ---- */
-    if (SDL_GL_MakeCurrent(sWindow, sGLCtx) != 0) {
-        fprintf(stderr, "[gfx] FATAL: SDL_GL_MakeCurrent failed: %s\n", SDL_GetError());
-        SDL_GL_DeleteContext(sGLCtx);
-        SDL_DestroyWindow(sWindow);
+        fprintf(stderr, "[gfx]   Hint: check that your GPU supports at least OpenGL 2.1\n");
         SDL_Quit();
         return false;
     }
@@ -125,10 +162,14 @@ bool Init(int width, int height) {
     SDL_GL_SwapWindow(sWindow);
 
     sRunning = true;
+
+    const char *glVer  = (const char *)glGetString(GL_VERSION);
+    const char *glslVer= (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
+    const char *glRend = (const char *)glGetString(GL_RENDERER);
     fprintf(stderr, "[gfx] OpenGL %s | GLSL %s | %s\n",
-            (const char *)glGetString(GL_VERSION),
-            (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION),
-            (const char *)glGetString(GL_RENDERER));
+            glVer  ? glVer  : "?",
+            glslVer? glslVer: "?",
+            glRend ? glRend : "?");
     fprintf(stderr, "[gfx] Ready (%dx%d)\n", width, height);
     return true;
 }

@@ -170,13 +170,23 @@ int main(int argc, char **argv) {
     /* Set TV type based on --pal flag */
     osTvType = gConfig.pal ? OS_TV_PAL : OS_TV_NTSC;
 
-    /* 1. Graphics window */
+    /* 1. Graphics window (SDL_INIT_VIDEO happens inside GfxBackend::Init) */
     fprintf(stderr, "[boot] [2/8] Initialising SDL2 + OpenGL window...\n");
     if (!GfxBackend::Init(gConfig.width, gConfig.height)) {
         fprintf(stderr, "[boot] FATAL: Failed to initialise graphics.\n");
         return 1;
     }
     fprintf(stderr, "[boot]        Window + GL context created OK\n");
+
+    /* Init additional SDL subsystems now that video is up */
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
+        fprintf(stderr, "[boot]        Gamecontroller init failed: %s (continuing)\n", SDL_GetError());
+    }
+    if (!gConfig.noAudio) {
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+            fprintf(stderr, "[boot]        SDL audio subsystem init failed: %s\n", SDL_GetError());
+        }
+    }
 
     /* 2. ROM asset loader */
     bool romLoaded = false;
