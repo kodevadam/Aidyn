@@ -40,9 +40,11 @@ namespace GfxBackend {
 
 static SDL_Window   *sWindow   = nullptr;
 static SDL_GLContext sGLCtx    = nullptr;
+static SDL_Renderer *sRenderer = nullptr;   /* used in software mode */
 static int           sWidth    = 640;   /* 2× native 320 */
 static int           sHeight   = 480;   /* 2× native 240 */
 static bool          sRunning  = false;
+static bool          sSoftware = false;     /* true = SDL2 software renderer */
 
 /* VI (video interface) overrides from osViSetMode() */
 static OSViMode *sCurrentMode  = nullptr;
@@ -50,9 +52,101 @@ static OSViMode *sCurrentMode  = nullptr;
 /* =========================================================================
  * Init / Shutdown
  * ========================================================================= */
-bool Init(int width, int height) {
+/* ---- Software-mode init (SDL2 renderer, no OpenGL) ---- */
+static bool init_software(int width, int height) {
+    fprintf(stderr, "[gfx] Creating window (software mode, no OpenGL)...\n");
+    sWindow = SDL_CreateWindow(
+        "Aidyn Chronicles: The First Mage",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    if (!sWindow) {
+        fprintf(stderr, "[gfx] FATAL: SDL_CreateWindow failed: %s\n", SDL_GetError());
+        return false;
+    }
+    fprintf(stderr, "[gfx]   Window created OK\n");
+
+    sRenderer = SDL_CreateRenderer(sWindow, -1, SDL_RENDERER_SOFTWARE);
+    if (!sRenderer) {
+        fprintf(stderr, "[gfx] FATAL: SDL_CreateRenderer(SOFTWARE) failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(sWindow);
+        sWindow = nullptr;
+        return false;
+    }
+    fprintf(stderr, "[gfx]   Software renderer created OK\n");
+
+    /* Test clear + present */
+    SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
+    SDL_RenderClear(sRenderer);
+    SDL_RenderPresent(sRenderer);
+    return true;
+}
+
+/* ---- OpenGL-mode init ---- */
+static bool init_opengl(int width, int height) {
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
+    fprintf(stderr, "[gfx] Creating window (OpenGL)...\n");
+
+    sWindow = SDL_CreateWindow(
+        "Aidyn Chronicles: The First Mage",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    if (!sWindow) {
+        fprintf(stderr, "[gfx]   SDL_CreateWindow(OPENGL) failed: %s\n", SDL_GetError());
+        return false;
+    }
+    fprintf(stderr, "[gfx]   Window created OK\n");
+
+    fprintf(stderr, "[gfx]   SDL_GL_CreateContext...\n");
+    sGLCtx = SDL_GL_CreateContext(sWindow);
+    if (!sGLCtx) {
+        fprintf(stderr, "[gfx]   SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(sWindow);
+        sWindow = nullptr;
+        return false;
+    }
+
+    if (SDL_GL_MakeCurrent(sWindow, sGLCtx) != 0) {
+        fprintf(stderr, "[gfx]   SDL_GL_MakeCurrent failed: %s\n", SDL_GetError());
+        SDL_GL_DeleteContext(sGLCtx);
+        SDL_DestroyWindow(sWindow);
+        sGLCtx  = nullptr;
+        sWindow = nullptr;
+        return false;
+    }
+
+    /* VSync */
+    if (SDL_GL_SetSwapInterval(1) != 0) {
+        fprintf(stderr, "[gfx]   VSync request failed: %s (continuing)\n", SDL_GetError());
+    } else {
+        fprintf(stderr, "[gfx]   VSync enabled\n");
+    }
+
+    /* GL state */
+    glViewport(0, 0, width, height);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glEnable(GL_DEPTH_TEST);
+
+    /* Test clear+swap */
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    SDL_GL_SwapWindow(sWindow);
+
+    const char *glVer  = (const char *)glGetString(GL_VERSION);
+    const char *glslVer= (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
+    const char *glRend = (const char *)glGetString(GL_RENDERER);
+    fprintf(stderr, "[gfx]   OpenGL %s | GLSL %s | %s\n",
+            glVer  ? glVer  : "?",
+            glslVer? glslVer: "?",
+            glRend ? glRend : "?");
+    return true;
+}
+
+bool Init(int width, int height, bool softwareMode) {
     sWidth  = width;
     sHeight = height;
+    sSoftware = softwareMode;
 
     /* ---- SDL_Init ----
      * Only init VIDEO here.  Audio and gamecontroller subsystems are
@@ -65,91 +159,47 @@ bool Init(int width, int height) {
     fprintf(stderr, "[gfx]   SDL initialised OK\n");
     fprintf(stderr, "[gfx]   Video driver: %s\n", SDL_GetCurrentVideoDriver());
 
-    /* ---- Create window ----
-     * Do NOT request a specific GL version via SDL_GL_SetAttribute before
-     * SDL_CreateWindow.  Some drivers (Mesa llvmpipe, older Intel, etc.)
-     * segfault inside SDL_CreateWindow when a Core profile they don't
-     * support is requested.  Instead we let the driver pick its default
-     * and check what we got afterwards. */
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-    fprintf(stderr, "[gfx] SDL_CreateWindow(%dx%d)...\n", width, height);
+    bool ok = false;
 
-    sWindow = SDL_CreateWindow(
-        "Aidyn Chronicles: The First Mage",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
-    if (!sWindow) {
-        fprintf(stderr, "[gfx] FATAL: SDL_CreateWindow failed: %s\n", SDL_GetError());
+    if (!sSoftware) {
+        /* Try OpenGL first.  NOTE: some drivers segfault inside
+         * SDL_CreateWindow when SDL_WINDOW_OPENGL is set – the only
+         * workaround is --software.  If it merely *fails*, we fall
+         * back to software automatically. */
+        ok = init_opengl(width, height);
+        if (!ok) {
+            fprintf(stderr, "[gfx]   OpenGL init failed – falling back to software renderer\n");
+            sSoftware = true;
+        }
+    }
+
+    if (sSoftware) {
+        ok = init_software(width, height);
+    }
+
+    if (!ok) {
+        fprintf(stderr, "[gfx] FATAL: Could not create a window with any backend.\n");
         fprintf(stderr, "[gfx]   Hint: try SDL_VIDEODRIVER=x11 or =wayland\n");
         SDL_Quit();
         return false;
     }
-    fprintf(stderr, "[gfx]   Window created OK\n");
-
-    /* ---- GL context ---- */
-    fprintf(stderr, "[gfx] SDL_GL_CreateContext...\n");
-    sGLCtx = SDL_GL_CreateContext(sWindow);
-    if (!sGLCtx) {
-        fprintf(stderr, "[gfx] FATAL: SDL_GL_CreateContext failed: %s\n", SDL_GetError());
-        fprintf(stderr, "[gfx]   Hint: check that your GPU supports at least OpenGL 2.1\n");
-        SDL_DestroyWindow(sWindow);
-        sWindow = nullptr;
-        SDL_Quit();
-        return false;
-    }
-
-    if (SDL_GL_MakeCurrent(sWindow, sGLCtx) != 0) {
-        fprintf(stderr, "[gfx] FATAL: SDL_GL_MakeCurrent failed: %s\n", SDL_GetError());
-        SDL_GL_DeleteContext(sGLCtx);
-        SDL_DestroyWindow(sWindow);
-        sGLCtx  = nullptr;
-        sWindow = nullptr;
-        SDL_Quit();
-        return false;
-    }
-
-    /* ---- VSync ---- */
-    if (SDL_GL_SetSwapInterval(1) != 0) {
-        fprintf(stderr, "[gfx]   VSync request failed: %s (continuing without vsync)\n",
-                SDL_GetError());
-    } else {
-        fprintf(stderr, "[gfx]   VSync enabled\n");
-    }
-
-    /* ---- GL state ---- */
-    glViewport(0, 0, width, height);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glEnable(GL_DEPTH_TEST);
-
-    /* ---- Verify with a test clear+swap ---- */
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    SDL_GL_SwapWindow(sWindow);
 
     sRunning = true;
-
-    const char *glVer  = (const char *)glGetString(GL_VERSION);
-    const char *glslVer= (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
-    const char *glRend = (const char *)glGetString(GL_RENDERER);
-    fprintf(stderr, "[gfx] OpenGL %s | GLSL %s | %s\n",
-            glVer  ? glVer  : "?",
-            glslVer? glslVer: "?",
-            glRend ? glRend : "?");
-    fprintf(stderr, "[gfx] Ready (%dx%d)\n", width, height);
+    fprintf(stderr, "[gfx] Ready (%dx%d, %s)\n", width, height,
+            sSoftware ? "software" : "OpenGL");
     return true;
 }
 
 void Shutdown() {
-    fprintf(stderr, "[gfx] Shutdown: deleting GL context...\n");
-    if (sGLCtx)  SDL_GL_DeleteContext(sGLCtx);
-    fprintf(stderr, "[gfx] Shutdown: destroying window...\n");
-    if (sWindow) SDL_DestroyWindow(sWindow);
-    fprintf(stderr, "[gfx] Shutdown: SDL_Quit...\n");
+    fprintf(stderr, "[gfx] Shutdown...\n");
+    if (sRenderer) SDL_DestroyRenderer(sRenderer);
+    if (sGLCtx)    SDL_GL_DeleteContext(sGLCtx);
+    if (sWindow)   SDL_DestroyWindow(sWindow);
     SDL_Quit();
-    sGLCtx  = nullptr;
-    sWindow = nullptr;
-    sRunning = false;
+    sRenderer = nullptr;
+    sGLCtx    = nullptr;
+    sWindow   = nullptr;
+    sRunning  = false;
     fprintf(stderr, "[gfx] Shutdown complete\n");
 }
 
@@ -170,7 +220,7 @@ bool PollEvents() {
             if (ev.window.event == SDL_WINDOWEVENT_RESIZED) {
                 sWidth  = ev.window.data1;
                 sHeight = ev.window.data2;
-                glViewport(0, 0, sWidth, sHeight);
+                if (!sSoftware) glViewport(0, 0, sWidth, sHeight);
             }
             break;
         default:
@@ -382,22 +432,37 @@ void StubFrame(unsigned long frameCount) {
     float r = 0.02f + 0.03f * sinf(t * 6.2832f);
     float g = 0.02f + 0.03f * sinf(t * 6.2832f + 2.094f);
     float b = 0.08f + 0.06f * sinf(t * 6.2832f + 4.189f);
-    glClearColor(r, g, b, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    SDL_GL_SwapWindow(sWindow);
+
+    if (sSoftware) {
+        SDL_SetRenderDrawColor(sRenderer,
+            (Uint8)(r * 255), (Uint8)(g * 255), (Uint8)(b * 255), 255);
+        SDL_RenderClear(sRenderer);
+        SDL_RenderPresent(sRenderer);
+    } else {
+        glClearColor(r, g, b, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        SDL_GL_SwapWindow(sWindow);
+    }
 }
 
 void SubmitFrame(OSScTask *task) {
     if (!task) return;
 
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if (sSoftware) {
+        /* Software mode: just clear and present for now */
+        SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
+        SDL_RenderClear(sRenderer);
+        SDL_RenderPresent(sRenderer);
+    } else {
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    /* Walk the display list attached to the task */
-    if (task->list.t.data_ptr) {
-        process_display_list((Gfx*)task->list.t.data_ptr);
+        /* Walk the display list attached to the task */
+        if (task->list.t.data_ptr) {
+            process_display_list((Gfx*)task->list.t.data_ptr);
+        }
+
+        SDL_GL_SwapWindow(sWindow);
     }
-
-    SDL_GL_SwapWindow(sWindow);
 }
 
 /* =========================================================================
@@ -409,10 +474,16 @@ extern "C" void osViSetMode(OSViMode *mode) {
 }
 
 extern "C" void osViBlack(u8 active) {
-    if (active) {
-        glClearColor(0,0,0,1);
-        glClear(GL_COLOR_BUFFER_BIT);
-        if (sWindow) SDL_GL_SwapWindow(sWindow);
+    if (active && sWindow) {
+        if (sSoftware) {
+            SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
+            SDL_RenderClear(sRenderer);
+            SDL_RenderPresent(sRenderer);
+        } else {
+            glClearColor(0,0,0,1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            SDL_GL_SwapWindow(sWindow);
+        }
     }
 }
 
@@ -421,7 +492,12 @@ extern "C" void osViSetYScale(float scale) { (void)scale; }
 extern "C" void osViSwapBuffer(void *buffer) {
     /* The game sometimes calls this directly; swap now. */
     (void)buffer;
-    if (sWindow) SDL_GL_SwapWindow(sWindow);
+    if (sWindow) {
+        if (sSoftware)
+            SDL_RenderPresent(sRenderer);
+        else
+            SDL_GL_SwapWindow(sWindow);
+    }
 }
 
 } /* namespace GfxBackend */

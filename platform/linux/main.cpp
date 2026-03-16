@@ -31,7 +31,7 @@
 /* =========================================================================
  * Forward declarations for backend namespaces
  * ========================================================================= */
-namespace GfxBackend   { bool Init(int w, int h); void Shutdown(); bool PollEvents(); void StubFrame(unsigned long frameCount); }
+namespace GfxBackend   { bool Init(int w, int h, bool softwareMode = false); void Shutdown(); bool PollEvents(); void StubFrame(unsigned long frameCount); }
 #if HAVE_SDL2_MIXER
 namespace AudioBackend { bool Init(int freq);      void Shutdown(); }
 #else
@@ -59,6 +59,7 @@ struct Config {
     bool        pal;
     bool        noAudio;
     bool        noRom;
+    bool        softwareRenderer;
 };
 
 static Config gConfig = {
@@ -70,6 +71,7 @@ static Config gConfig = {
     .pal       = false,
     .noAudio   = false,
     .noRom     = false,
+    .softwareRenderer = false,
 };
 
 static void print_usage(const char *argv0) {
@@ -82,6 +84,7 @@ static void print_usage(const char *argv0) {
         "  --freq   N      Audio sample rate (default 44100)\n"
         "  --no-audio      Skip audio initialisation\n"
         "  --no-rom        Skip ROM loading (window-only test)\n"
+        "  --software      Use SDL2 software renderer (no OpenGL)\n"
         "  -h / --help     Show this message\n",
         argv0);
 }
@@ -105,6 +108,8 @@ static bool parse_args(int argc, char **argv) {
             gConfig.noAudio = true;
         } else if (strcmp(argv[i], "--no-rom") == 0) {
             gConfig.noRom = true;
+        } else if (strcmp(argv[i], "--software") == 0) {
+            gConfig.softwareRenderer = true;
         } else if (argv[i][0] != '-') {
             gConfig.romPath = argv[i];
         } else {
@@ -171,8 +176,9 @@ int main(int argc, char **argv) {
     osTvType = gConfig.pal ? OS_TV_PAL : OS_TV_NTSC;
 
     /* 1. Graphics window (SDL_INIT_VIDEO happens inside GfxBackend::Init) */
-    fprintf(stderr, "[boot] [2/8] Initialising SDL2 + OpenGL window...\n");
-    if (!GfxBackend::Init(gConfig.width, gConfig.height)) {
+    fprintf(stderr, "[boot] [2/8] Initialising SDL2 + %s window...\n",
+            gConfig.softwareRenderer ? "software renderer" : "OpenGL");
+    if (!GfxBackend::Init(gConfig.width, gConfig.height, gConfig.softwareRenderer)) {
         fprintf(stderr, "[boot] FATAL: Failed to initialise graphics.\n");
         return 1;
     }
