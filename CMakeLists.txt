@@ -146,6 +146,14 @@ add_executable(aidyn
 # --allow-multiple-definitions tells the linker to accept the first definition.
 target_link_options(aidyn PRIVATE "LINKER:--allow-multiple-definition")
 
+# Hide game symbols (especially operator new/delete) from dynamic export.
+# Without this, shared libraries (libfluidsynth, libmodplug, etc.) pick up
+# the game's custom allocator which adds a HeapBlock header, causing heap
+# corruption when those libraries mix malloc/free with new/delete.
+target_link_options(aidyn PRIVATE
+  "LINKER:--version-script=${CMAKE_SOURCE_DIR}/platform/linux/version.ld"
+)
+
 target_link_libraries(aidyn
   ${SDL2_LIBRARIES}
   ${OPENGL_LIBRARIES}

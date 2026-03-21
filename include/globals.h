@@ -258,7 +258,7 @@ extern u16 gDebugFlag;
 
 
 extern u16 gExpPakFlag; //set when OsMemSize>4MB.
-GlobalsAidyn gGlobals;
+extern GlobalsAidyn gGlobals;
 
 extern OSMesg* PTR_800e8f30;
 extern void* osSched_stack;
