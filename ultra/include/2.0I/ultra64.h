@@ -75,8 +75,8 @@ extern u32 osTvType;
  * ========================================================================= */
 typedef void *OSMesg;
 
-#define OS_MESG_BLOCK    0
-#define OS_MESG_NOBLOCK  1
+#define OS_MESG_NOBLOCK  0
+#define OS_MESG_BLOCK    1
 #define OS_MESG_PRI_NORMAL 0
 #define OS_MESG_PRI_HIGH   1
 
