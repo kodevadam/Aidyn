@@ -439,7 +439,13 @@ extern "C" s32 osContStartQuery(OSMesgQueue *mq) {
     return 0;
 }
 extern "C" void osContGetQuery(OSContStatus *data) {
-    if (data) memset(data, 0, sizeof(OSContStatus) * MAXCONTROLLERS);
+    if (data) {
+        memset(data, 0, sizeof(OSContStatus) * MAXCONTROLLERS);
+        /* Report port 0 as a standard controller so the game doesn't
+         * show "no controller" warnings.  Real input comes via SDL. */
+        data[0].type = CONT_TYPE_NORMAL;
+        data[0].errno_ = 0;
+    }
 }
 
 /* Controller Pak / rumble stubs */
