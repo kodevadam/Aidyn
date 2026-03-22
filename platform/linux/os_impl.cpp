@@ -185,10 +185,12 @@ extern "C" s32 osRecvMesg(OSMesgQueue *mq, OSMesg *msg, s32 flag) {
  * Events
  * ========================================================================= */
 extern "C" void osSetEventMesg(OSEvent e, OSMesgQueue *mq, OSMesg msg) {
-    /* Event routing is not implemented – the game uses this mainly for the
-     * SI (serial interface) done event from osContInit.  We fire it
-     * immediately so Init functions don't block. */
-    (void)e;
+    /* OS_EVENT_FAULT: the crash handler registers for this; do NOT fire it
+     * immediately or the handler will think a fault occurred at startup.
+     * For other events (e.g. OS_EVENT_SI from osContInit) we fire the
+     * message immediately so Init functions don't block forever. */
+    if (e == OS_EVENT_FAULT)
+        return;
     osSendMesg(mq, msg, OS_MESG_NOBLOCK);
 }
 
