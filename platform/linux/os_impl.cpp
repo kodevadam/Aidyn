@@ -279,6 +279,11 @@ static long sched_frame_ns(OSSched *sc) {
     return 1000000000L / 60;
 }
 
+/* Static message values – game code dereferences the message pointer as
+ * *(s16*)msg to read the message type, so we must send a real pointer. */
+static s16 sScRetraceMsg = OS_SC_RETRACE_MSG;
+static s16 sScDoneMsg    = OS_SC_DONE_MSG;
+
 static void *sched_thread(void *arg) {
     auto *ctx = static_cast<SchedContext *>(arg);
     OSSched *sc = ctx->sc;
@@ -304,7 +309,7 @@ static void *sched_thread(void *arg) {
         sc->frameCount++;
         OSScClient *c = sc->clientList;
         while (c) {
-            osSendMesg(c->msgQ, c->msg, OS_MESG_NOBLOCK);
+            osSendMesg(c->msgQ, (OSMesg)&sScRetraceMsg, OS_MESG_NOBLOCK);
             c = c->next;
         }
         pthread_mutex_unlock(&sc->mutex);
