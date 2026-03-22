@@ -83,6 +83,10 @@ u8 Font::LoadFace(FontStruct *fontP,u32 b8,u8 rows,u8 cols){
   u16 *puVar5;
   FontSubstruct *pFVar7;
   
+  if (rows == 0 || cols == 0) {
+    fprintf(stderr, "[font] LoadFace: rows=%u cols=%u – refusing divide-by-zero\n", rows, cols);
+    return false;
+  }
   if (fontP->fontsLoaded < fontP->fontTotal) {
     if (fontP->fontsLoaded == 0) fontP->fontIndex = 0;
     bVar6 = fontP->fontsLoaded + 1;

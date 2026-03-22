@@ -214,7 +214,7 @@ void appProc_init(void){
   Font::Init(gGlobals.font,i);
   if (0 < i) {
     for(;i!=0;i--){
-      FontFace *f=&font_face[i];
+      FontFace *f=&font_face[i-1];
       Font::LoadFace(gGlobals.font,f->borg8,f->rows,f->cols);
     }
   }
