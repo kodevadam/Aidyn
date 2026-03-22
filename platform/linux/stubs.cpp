@@ -48,8 +48,12 @@ u32 bitfeild_array[1]       = {0};
 u32 copyrightStrings        = 0;
 
 void* audiokey_rom          = nullptr;
-void* borg_files            = nullptr;
-void* borg_listings         = nullptr;
+/* N64 ROM symbols – these were linker-placed in ROM, so &symbol gave the
+ * ROM address.  On Linux the game code passes these directly (after fixing
+ * seed.cpp to drop the &).  Values are N64 physical addresses; DmaRead
+ * strips PI_ROM_BASE (0x10000000) to get file offsets. */
+void* borg_files            = (void*)0x100F5DA0; /* ROM offset 0x0F5DA0 */
+void* borg_listings         = (void*)0x11F98790; /* ROM offset 0x1F98790 */
 void* cinematic_titles      = nullptr;
 void* combat_romstrings     = nullptr;
 void* common_string_array   = nullptr;

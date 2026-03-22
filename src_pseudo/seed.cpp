@@ -56,7 +56,10 @@ extern "C" void InitProc(void* p){
   fprintf(stderr, "[init] RomCopy::Init...\n");
   RomCopy::Init(9,3);
   fprintf(stderr, "[init] SetBorgListing...\n");
-  SetBorgListing(&borg_listings,borg_files);
+  /* On N64, borg_listings was a linker symbol IN ROM — &borg_listings gave
+   * the ROM address.  On Linux, borg_listings is a void* holding the ROM
+   * physical address, so pass the value directly (not &). */
+  SetBorgListing(borg_listings,borg_files);
   fprintf(stderr, "[init] appInit...\n");
   RAND.SetSeed(TIME_USEC);//sems redundant - set to fixed value in appProc_init later.
   appInit(&gSched,8,2);
