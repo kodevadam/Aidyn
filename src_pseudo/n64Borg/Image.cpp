@@ -33,7 +33,44 @@ void borg8_free_ofunc(Borg8Header *param_1){
 //@returns Header of image
 Borg8Header* loadBorg8(u32 index){
   setBorgFlag();
-  return (Borg8Header *)getBorgItem(index);}
+  borgHeader *item = getBorgItem(index);
+  if (!item) return nullptr;
+
+#ifdef __linux__
+  /* On N64, many "BORG8_" indexed assets are actually Type=1 (textures),
+   * not Type=8 (images).  The 32-bit N64 struct layouts overlapped in a
+   * way that let the Borg8Header cast "work".  On 64-bit Linux the layouts
+   * differ, so we build a proper Borg8Header from the Borg1 data. */
+  s16 listingType = get_borg_listing_type(index);
+  if (listingType == 1) {
+    Borg1Header *b1 = (Borg1Header *)item;
+    if (b1->dat) {
+      Borg8Header *b8;
+      ALLOCS(b8, sizeof(Borg8Header), 35);
+      if (b8) {
+        b8->head = *item;
+        b8->dat.Width  = (u16)b1->dat->Width;
+        b8->dat.Height = (u16)b1->dat->Height;
+        b8->dat.unk06  = 0;
+        /* Map Borg1 type enum → Borg8 format enum.
+         * B1: RGBA16=0 IA16=1 CI8=2 IA8=3 I8=4 CI4=5 IA4=6 I4=7 RGBA32=8
+         * B8: RGBA32=1 RGBA16=2 IA16=3 CI8=4 IA8=5 I8=6  CI4=7 IA4=8 I4=9 */
+        static const u16 b1_to_b8[] = {
+          BORG8_RGBA16, BORG8_IA16, BORG8_CI8, BORG8_IA8,
+          BORG8_I8, BORG8_CI4, BORG8_IA4, BORG8_I4, BORG8_RBGA32
+        };
+        u16 t = b1->dat->type;
+        b8->dat.format  = (t < 9) ? b1_to_b8[t] : BORG8_RGBA16;
+        b8->dat.palette = b1->dat->pallette;
+        b8->dat.offset  = (void *)b1->bitmapA;
+        return b8;
+      }
+    }
+  }
+#endif
+
+  return (Borg8Header *)item;
+}
 
 
 //gets called before almost every borg8 draw command
