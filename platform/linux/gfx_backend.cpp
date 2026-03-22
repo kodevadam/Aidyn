@@ -237,21 +237,24 @@ bool PollEvents() {
  * used by F3DEX2 are listed.  The full set is ~50 commands.
  * ========================================================================= */
 /* GBI opcode enum – use GBI_ prefix to avoid collisions with ultra64.h macros */
+/* F3DEX2 opcodes – corrected from the N64 SDK gbi.h */
 enum GbiCmd : u8 {
     GBI_SPNOOP        = 0x00,
-    GBI_MTX           = 0x01,
-    GBI_MOVEMEM       = 0x03,
-    GBI_VTX           = 0x04,
-    GBI_DL            = 0x06,
-    GBI_ENDDL         = 0xB8,
-    GBI_CULLDL        = 0xBE,
-    GBI_MOVEWORD      = 0xBC,
-    GBI_TEXTURE       = 0xBB,
-    GBI_POPMTX        = 0xBA,
-    GBI_GEOMETRYMODE  = 0xB9,
-    GBI_TRI1          = 0xBF,
-    GBI_TRI2          = 0xB1,
-    GBI_QUAD          = 0xB5,
+    GBI_VTX           = 0x01,
+    GBI_MODIFYVTX     = 0x02,
+    GBI_CULLDL        = 0x03,
+    GBI_BRANCH_Z      = 0x04,
+    GBI_TRI1          = 0x05,
+    GBI_TRI2          = 0x06,
+    GBI_QUAD          = 0x07,
+    GBI_DL            = 0xDE,
+    GBI_ENDDL         = 0xDF,
+    GBI_MTX           = 0xDA,
+    GBI_MOVEWORD      = 0xDB,
+    GBI_MOVEMEM       = 0xDC,
+    GBI_TEXTURE       = 0xD7,
+    GBI_POPMTX        = 0xD8,
+    GBI_GEOMETRYMODE  = 0xD9,
     GBI_RDPPIPESYNC   = 0xE7,
     GBI_RDPFULLSYNC   = 0xE9,
     GBI_SETSCISSOR    = 0xED,
@@ -317,14 +320,11 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             return; /* end of display list */
 
         case GBI_DL: {
-            /* Call sub-display list.
-             * The address is in the low 32 bits of w.lo. Pool memory is in
-             * the lower 2GB (MAP_32BIT), so zero-extending gives a valid ptr.
-             * Skip if the address looks invalid. */
+            /* Call sub-display list.  Address is in w.lo. */
             uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
-            if (addr >= 0x40000000 && addr < 0x50000000) {
+            if (ptr_in_pool(addr)) {
                 const Gfx *subdl = reinterpret_cast<const Gfx *>(addr);
-                bool branch = (dl->w.hi >> 16) & 0xFF;
+                bool branch = (dl->w.hi & 0xFF0000) >> 16;
                 process_display_list(subdl, depth + 1);
                 if (branch) return;
             }
