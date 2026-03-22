@@ -1,5 +1,6 @@
 #include "decompress.h"
 #include "unkFuncs.h"
+#include <cstdio>
 //compession format largely used by text.
 
 //starts with abandoned code. May be related to compession function?
@@ -613,7 +614,11 @@ s32 decompress_LZ01(u8 *compDat,u32 compSize,u8 *OutDat,u32 *OutSize){
   int iVar7;
   u32 uVar8;
   u8 *pbVar9;
-  
+
+  fprintf(stderr, "[LZ01] ENTER: compDat=%p compSize=%u OutDat=%p first4=%02x %02x %02x %02x\n",
+          (void*)compDat, compSize, (void*)OutDat,
+          compDat[0], compDat[1], compDat[2], compDat[3]);
+
   *OutSize = 0;
   pbVar3 = compDat + compSize;
   pbVar9 = OutDat;
