@@ -54,7 +54,11 @@ LAB_800aa428:
       uVar6++;
     } while ((u32)*pbVar1 * 2 >> 8 == 0);
 LAB_800aa478:
-    if (iVar7 != 2) {
+    if (iVar7 == 2) {
+      /* iVar7==2: shortest match code → decode fresh offset byte.
+       * The decompiler originally had "!= 2" here, but that makes the
+       * end-of-stream check unreachable: only (2-3)*256 + 0xFF == -1.
+       * Confirmed by the identical pattern in LZB_func_2 / LZB_func_3. */
       iVar7 = (iVar7 + -3) * 0x100 + (u32)compDat[uVar6];
       uVar6++;
       if (iVar7 == -1) {
@@ -182,7 +186,7 @@ LAB_800aa690:
           uVar4 = ((u32)*pbVar3 + (u32)pbVar3[1] * 0x100) * 2 + 1;
         }
       } while ((uVar4 >> 0x10 & 1) == 0);
-      if (iVar7 != 2) {
+      if (iVar7 == 2) {
         bVar1 = *pbVar6;
         pbVar6++;
         iVar7 = (iVar7 + -3) * 0x100 + (u32)bVar1;
@@ -341,7 +345,7 @@ LAB_800aa958:
         uVar15 = uVar15 + 4;
       } while (-1 < (s32)uVar7);
 LAB_800aaa0c:
-      if (iVar13 != 2) {
+      if (iVar13 == 2) {
         bVar5 = *pbVar10;
         pbVar10 = pbVar10 + 1;
         iVar13 = (iVar13 + -3) * 0x100 + (u32)bVar5;

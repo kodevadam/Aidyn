@@ -60,25 +60,11 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       decompress_LZ01(compressedDat,compSize,borgfile,auStack40);
       HFREE(compressedDat,397);
       break;
-    case Compress_LZB: {
-      /* LZB back-references can extend before the output buffer into a
-       * "dictionary" region.  On N64 this was zeroed RDRAM; on Linux the
-       * heap layout differs, so we provide an explicit zero-filled prefix. */
-      static constexpr u32 LZB_PREFIX = 128u * 1024; /* 128 KB */
+    case Compress_LZB:
       ALLOCS(compressedDat,compSize,407);
       ROMCOPYS(compressedDat,param_1,compSize,411);
-      /* Allocate generous prefix AND suffix to prevent crashes while
-       * we diagnose the dictionary issue. */
-      static constexpr u32 LZB_SUFFIX = 256u * 1024;
-      u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize + LZB_SUFFIX);
-      if (!tmpBuf) { fprintf(stderr, "[borg] calloc FAILED\n"); break; }
-      decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
-      fprintf(stderr, "[borg] LZB done: outSize reported=%u (expected %u)\n",
-              auStack40[0], outSize);
-      memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
-      free(tmpBuf);
+      decompress_LZB(compressedDat,compSize,borgfile,auStack40);
       HFREE(compressedDat,421);
-    }
   }
   fprintf(stderr, "[borg] decompressBorg done\n");
   return true;
