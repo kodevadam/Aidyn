@@ -141,9 +141,12 @@ void AppProc(void *x){
           Gsprintf("HandleAppFrame()");
           gGlobals.ticker++;
           if (doubleGlobalTickerFlag == 1) gGlobals.ticker++;
+          fprintf(stderr, "[app] calling appProc_caseSwitch (appstate=%d)\n", gGlobals.appstate);
           gfx1 = appProc_caseSwitch(gfx0);
+          fprintf(stderr, "[app] caseSwitch returned, gfx1=%p (appstate now=%d)\n", (void*)gfx1, gGlobals.appstate);
           #if DEBUGVER //print detailed debug stats in Debug version
           gfx1 = display_debug_stats(gfx1);
+          fprintf(stderr, "[app] debug_stats returned gfx1=%p\n", (void*)gfx1);
           #else //print just player coords if Retail Version and !version cheat used
           if ((version_flag) && (gPlayer)) {
             Gsprintf("%c%02d-(%2.1f,%2.1f)\n",gGlobals.gameVars.mapShort1 + ('A'-1)
@@ -155,6 +158,7 @@ void AppProc(void *x){
           void* x;
           NOOP_800a2448(x);
           gfx1 = ret_A0(gfx1);
+          fprintf(stderr, "[app] calling EndList\n");
           gfx1 = Graphics::EndList(gfx1);
           gListSizeMax = 0x3200;
           if (gExpPakFlag) gListSizeMax = 0x6400;
