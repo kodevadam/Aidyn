@@ -2,6 +2,8 @@
 #include "world.h"
 #include "stringN64.h"
 
+/* Single definition of the global game state (declared extern in globals.h) */
+GlobalsAidyn gGlobals;
 
 u8 DAT_800e8d50[]={0,0,0,0,1,0,0,0};//unused data, seen at start of section.
 u16 SkillCheckSteps[]={0,26,46,62,81,96,111,122,

@@ -2,13 +2,16 @@
 
 #include "globals.h"
 #include "memcheck.h"
+#include <cstdio>
 
 OSMesg* PTR_800e8f30=NULL;
 void* osSched_stack=NULL;
 u64 gInitThreadStack[105]={0};
 OSThread gInitThread={0};
-OSSched gSched={0};
-OSMesgQueue gPIManagerQueue={0};
+OSSched gSched;
+OSMesgQueue gPIManagerQueue;
+
+extern "C" void InitProc(void* p);
 
 void bootproc(void){
   osInitialize();
@@ -20,14 +23,17 @@ void bootproc(void){
 extern void*borg_listings;
 extern void*borg_files;
 
-void InitProc(void* p){
+extern "C" void InitProc(void* p){
   CLEAR(&gGlobals);
   Crash::InitProc(crash_handler,NULL,50,6);
   MemoryCheck((uintptr_t)romMain,(uintptr_t)(&clear_end - &romMain));
+  fprintf(stderr, "[init] HeapInit...\n");
   HeapInit(gMemCheckStruct.heapStart,gMemCheckStruct.mem_free_allocated);
   ALLOCS(PTR_800e8f30,sizeof(OSMesg)*8,173);
+  fprintf(stderr, "[init] osCreatePiManager...\n");
   osCreatePiManager(OS_PRIORITY_PIMGR,&gPIManagerQueue,PTR_800e8f30,8);
   ALLOCS(osSched_stack,0x2000,177);
+  fprintf(stderr, "[init] osCreateScheduler...\n");
   switch(osTvType){
     case OS_TV_PAL:
       osCreateScheduler(&gSched,(void *)((uintptr_t)osSched_stack + 0x2000),0xc,OS_VI_PAL_LAN1,1);
@@ -39,14 +45,25 @@ void InitProc(void* p){
       osCreateScheduler(&gSched,(void *)((uintptr_t)osSched_stack + 0x2000),0xc,OS_VI_MPAL_LAN1,1);
       break;
   }
+  fprintf(stderr, "[init] Graphics::initGfx...\n");
   Graphics::initGfx(&gSched);
+  fprintf(stderr, "[init] DCM::StartThread...\n");
   DCM::StartThread(&gSched,44100,11,5);
+  fprintf(stderr, "[init] DCM::Init...\n");
   DCM::Init();
+  fprintf(stderr, "[init] Controller::Init...\n");
   Controller::Init(&gSched,1,10,4);
+  fprintf(stderr, "[init] RomCopy::Init...\n");
   RomCopy::Init(9,3);
-  SetBorgListing(&borg_listings,borg_files);
+  fprintf(stderr, "[init] SetBorgListing...\n");
+  /* On N64, borg_listings was a linker symbol IN ROM — &borg_listings gave
+   * the ROM address.  On Linux, borg_listings is a void* holding the ROM
+   * physical address, so pass the value directly (not &). */
+  SetBorgListing(borg_listings,borg_files);
+  fprintf(stderr, "[init] appInit...\n");
   RAND.SetSeed(TIME_USEC);//sems redundant - set to fixed value in appProc_init later.
   appInit(&gSched,8,2);
+  fprintf(stderr, "[init] InitProc complete, idling\n");
   osSetThreadPri(&gInitThread,OS_PRIORITY_IDLE);
   while(1){}
 }

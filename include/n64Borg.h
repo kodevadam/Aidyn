@@ -1,3 +1,4 @@
+#pragma once
 #include "Borgindecies.h"
 #include "borg/borg5.h"
 #include "borg/borg7.h"
@@ -41,7 +42,7 @@ u8 borg3_func_b(void*, void* );
 void borg5_func_a(Borg5Header*);
 u8 InitBorgScene(Borg5Header *,void*);
 void borg5_free(Borg5Header *);
-void borg6_func_a(Borg6Header*);
+void borg6_func_a(Borg6Data*);
 u8 borg6_func_b(Borg6Header *,Borg6Data *);
 void borg_6_free(Borg6Header *);
 void borg7_func_a(Borg7Header *);
@@ -184,7 +185,7 @@ u32 borgTotal=0;
 
 
 //macro used to adjust offsets in header
-#define SetPointer(x,f) x->f= decltype(x->f)((uintptr_t)&x+(uintptr_t)x->f)
+#define SetPointer(x,f) x->f= decltype(x->f)((uintptr_t)x+(uintptr_t)x->f)
 //same as SetPointer(), but makes sure there is an offset
 #define CheckSetPointer(x,f) if(x->f) SetPointer(x,f)
 

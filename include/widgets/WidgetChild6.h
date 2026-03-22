@@ -1,4 +1,7 @@
+#pragma once
 #include "widgets/WidgetMenu.h"
+#include "widgets/WidgetBorg8.h"
+#include "widgets/WidgetClipText.h"
 #include "savefiles.h"
 #include "GuiAnimation.h"
 
@@ -6,7 +9,7 @@ class WidgetSaveFile : public WidgetMenu {
     public:
     WidgetSaveFile* prev;
     WidgetSaveFile* next;
-    inline WidgetSaveFile();
+    WidgetSaveFile();
     ~WidgetSaveFile();
     virtual void unk();
     virtual void unk2();

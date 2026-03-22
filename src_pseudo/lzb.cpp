@@ -1,4 +1,6 @@
 #include "decompress.h"
+#include <cstdio>
+#include <cstdlib>
 //compession format of most art assets
 
 s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
@@ -11,8 +13,24 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
   s32 iVar7 = 1;
   u32 uVar8;
   s32 iVar9 = 0;
-  
+  u8 *OutDatStart = OutDat;
+  u32 maxOut = *outSize;
+  u32 iter = 0;
+
+#define LZB_CHECK_IN(where) do { \
+    if (uVar6 >= CompSize + 16) { \
+      fprintf(stderr, "[lzb] FATAL: input overrun at %s: in=%u/%u out=%d/%u iter=%u\n", \
+              where, uVar6, CompSize, iVar9, maxOut, iter); \
+      *outSize = iVar9; return -1; \
+    } \
+  } while(0)
+
   do {
+    iter++;
+    if (iter <= 5 || (iter % 500 == 0)) {
+      fprintf(stderr, "[lzb] iter=%u in=%u/%u out=%d/%u uVar5=0x%x\n",
+              iter, uVar6, CompSize, iVar9, maxOut, uVar5);
+    }
     while( true ) {
       uVar5 <<= 1;
       if ((uVar5 & 0xff) == 0) break;
@@ -20,12 +38,14 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
         goto LAB_800aa428;
       }
 LAB_800aa3e8:
+      LZB_CHECK_IN("literal");
       pbVar1 = compDat + uVar6;
       uVar6++;
       iVar9++;
       *OutDat = *pbVar1;
       OutDat++;
     }
+    LZB_CHECK_IN("control");
     pbVar1 = compDat + uVar6;
     uVar5 = (u32)*pbVar1 * 2 + 1;
     uVar6++;
@@ -36,6 +56,7 @@ LAB_800aa428:
       while( true ) {
         uVar5<<= 1;
         if ((uVar5 & 0xff) == 0) {
+          LZB_CHECK_IN("offset-bits");
           pbVar1 = compDat + uVar6;
           uVar6++;
           uVar5 = (u32)*pbVar1 * 2 + 1;
@@ -49,15 +70,19 @@ LAB_800aa428:
         if ((uVar5 & 0xff) == 0) break;
         if ((uVar5 >> 8 & 1) != 0) goto LAB_800aa478;
       }
+      LZB_CHECK_IN("offset-bits2");
       pbVar1 = compDat + uVar6;
       uVar5 = (u32)*pbVar1 * 2 + 1;
       uVar6++;
     } while ((u32)*pbVar1 * 2 >> 8 == 0);
 LAB_800aa478:
     if (iVar7 != 2) {
+      LZB_CHECK_IN("offset-byte");
       iVar7 = (iVar7 + -3) * 0x100 + (u32)compDat[uVar6];
       uVar6++;
       if (iVar7 == -1) {
+        fprintf(stderr, "[lzb] EOS found: in=%u/%u out=%d iter=%u\n",
+                uVar6, CompSize, iVar9, iter);
         *outSize = iVar9;
         if (uVar6 == CompSize) {
           errOut = 0;
@@ -71,9 +96,14 @@ LAB_800aa478:
         return errOut;
       }
       uVar8 = iVar7 + 1;
+      if (iter <= 5) {
+        fprintf(stderr, "[lzb] new offset: iVar7=%d uVar8=%u in=%u out=%d\n",
+                iVar7, uVar8, uVar6, iVar9);
+      }
     }
     uVar5 <<= 1;
     if ((uVar5 & 0xff) == 0) {
+      LZB_CHECK_IN("len-bits1");
       pbVar1 = compDat + uVar6;
       uVar6++;
       uVar5 = (u32)*pbVar1 * 2 + 1;
@@ -82,6 +112,7 @@ LAB_800aa478:
     else {uVar3 = uVar5 >> 8 & 1;}
     uVar5 = uVar5 << 1;
     if ((uVar5 & 0xff) == 0) {
+      LZB_CHECK_IN("len-bits2");
       pbVar1 = compDat + uVar6;
       uVar6++;
       uVar5 = (u32)*pbVar1 * 2 + 1;
@@ -95,6 +126,7 @@ LAB_800aa478:
         while( true ) {
           uVar5 <<= 1;
           if ((uVar5 & 0xff) == 0) {
+            LZB_CHECK_IN("extlen-bits");
             pbVar1 = compDat + uVar6;
             uVar6++;
             uVar5 = (u32)*pbVar1 * 2 + 1;
@@ -106,6 +138,7 @@ LAB_800aa478:
           if ((uVar5 & 0xff) == 0) break;
           if ((uVar5 >> 8 & 1) != 0) goto LAB_800aa598;
         }
+        LZB_CHECK_IN("extlen-bits2");
         pbVar1 = compDat + uVar6;
         uVar5 = (u32)*pbVar1 * 2 + 1;
         uVar6++;
@@ -114,7 +147,7 @@ LAB_800aa598:
       iVar7+=2;
     }
     iVar7+= (uVar8 < 0xd01 ^ 1);
-    pbVar1 = OutDat + -uVar8;
+    pbVar1 = OutDat - uVar8;
     iVar9++;
     *OutDat = *pbVar1;
     OutDat++;
@@ -126,6 +159,7 @@ LAB_800aa598:
       OutDat++;
     } while (iVar7 != 0);
   } while( true );
+#undef LZB_CHECK_IN
 }
 
 //two unused funcs below (16/32 bit versions?)
@@ -142,7 +176,7 @@ s32 LZB_func_2(u8 *param_1,u32 param_2,u8 *param_3,s32 *param_4){
   u32 uVar8;
   u32 uVar9;
   s32 iVar10;
-  
+
   uVar4 = 0;
   uVar9 = 0;
   iVar10 = 0;
@@ -239,7 +273,7 @@ LAB_800aa690:
         iVar7+= 2;
       }
       iVar7+= (uVar8 < 0xd01 ^ 1);
-      pbVar2 = param_3 + -uVar8;
+      pbVar2 = param_3 - uVar8;
       iVar10++;
       *param_3 = *pbVar2;
       param_3++;
@@ -280,7 +314,7 @@ s32 LZB_func_3(u8 *param_1,u32 param_2,u8 *param_3,s32 *param_4){
   u32 uVar14;
   u32 uVar15;
   s32 iVar16;
-  
+
   uVar11 = 0;
   uVar7 = 0;
   uVar15 = 0;
@@ -433,7 +467,7 @@ LAB_800aab98:
         iVar13 = iVar13 + 2;
       }
       iVar13 = iVar13 + (uVar14 < 0xd01 ^ 1);
-      pbVar8 = param_3 + -uVar14;
+      pbVar8 = param_3 - uVar14;
       iVar16 = iVar16 + 1;
       *param_3 = *pbVar8;
       param_3 = param_3 + 1;

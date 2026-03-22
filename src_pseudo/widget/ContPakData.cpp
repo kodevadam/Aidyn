@@ -1,5 +1,6 @@
 #include "globals.h"
 #include "widgets/ContPakData.h"
+#include "ContPakInit.h"
 #include "widgets/widgetGroup.h"
 #include "CRC.h"
 #include "QuestData.h"
@@ -16,8 +17,8 @@ WContPakData_Save(u16 param_1,u16 param_2,void *param_3,Color32 *param_4,Color32
 
 WidgetContPakData *
 WContPakData_Load(u16 param_1,u16 param_2,void *param_3,void *param_4,Color32 * param_5,
-                 Color32 *param_6,Color32* param_7){
-  contPakDat = new WidgetContPakDataLoad(param_1,param_2,param_3,param_4,param_5,param_6,param_7);
+                 Color32 *param_6,Color32 param_7){
+  contPakDat = new WidgetContPakDataLoad(param_1,param_2,param_3,param_4,param_5,param_6,&param_7);
   Controller::GetDelay(0);
   return contPakDat;
 }
@@ -456,6 +457,7 @@ void WidgetContPakData::ReadSaveFile(){
     this->pfsErr = Controller::GetPakSaveState(&filestate,(u32)index,0);
     if (this->pfsErr == PFS_ERR_BAD_DATA) goto LAB_80087164;
   }
+  {
   if (this->pfsErr) return;
   if (filestate.comp_code != THQCompCode) return;
   if (filestate.game_code != AidynGameCode) return;
@@ -480,6 +482,7 @@ void WidgetContPakData::ReadSaveFile(){
     LoadSliders(this->saveDatsP + index,index);
     this->AidynSaveSlots++;
     return;
+  }
   }
 LAB_80087164:
   this->OtherState = 4;
@@ -604,8 +607,13 @@ void WidgetContPakData::m8008759c(){
 }
 
 u32 WidgetContPakData::WriteSaveFile(u8 slot){}
-
 void WidgetContPakData::vm100(){}
+void WidgetContPakData::unk(){}
+u32 WidgetContPakData::ShowSaveFiles(){return 0;}
+void WidgetContPakData::LoadSaveFile(u8){}
+u32 WidgetContPakData::vmE0(BaseWidget*){return 0;}
+u32 WidgetContPakData::vmF0(){return 0;}
+u32 WidgetContPakDataSave::vmE8(){return 0;}
 
 void WidgetContPakData::PfsErrOK(){this->OtherState=2;}
 
@@ -831,7 +839,7 @@ void WidgetContPakDataSave::NewSaveFile(){
       LowSpaceWarn();
       return;
     }
-    for(i=0;<SaveFileMax;i++){
+    for(i=0;i<SaveFileMax;i++){
       sprintf(acStack_70,"%c",i + 'A');
       for (j = 0; j < uVar5; j++) {
         if (!strcmp(acStack_b0 + j * 4,acStack_70)) break;
@@ -974,7 +982,7 @@ WidgetChoiceDia *FUN_80088aac(void (*func)(BaseWidget*),WidgetHandler *handler,u
   
   uVar2 = 200;
   if (gGlobals.BigAssMenu) uVar2 = 150;
-  WidgetChoiceDia *pWVar1 = new WidgetChoiceDia(choices,title,uVar2,&colA,&colB,0,10,0);
+  pWVar1 = new WidgetChoiceDia(choices,title,uVar2,&colA,&colB,0,10,0);
   if (gGlobals.BigAssMenu) Utilities::MoveWidget(pWVar1,25,0);
   handler->AddWidget(pWVar1);
   freeWidgetFunc = func;
@@ -1072,13 +1080,13 @@ u8 ContPakWidget::m80088f0c(BaseWidget *w){
 
 void ContPakWidget::m80088f44(){this->menuState = 0;}
 
+BaseWidget * ContPakWidget::BFunc(){return this;}
+
 BaseWidget * ContPakWidget::AFunc(){
   BaseWidget *w = NULL;
   if (this->windowLoaded) w = Utilities::GetHighlightedEntry(this->w80);
   return w;
 }
-
-BaseWidget * ContPakWidget::AFunc(){return this;}
 
 BaseWidget * ContPakWidget::UpFunc(){
   if (this->windowLoaded) this->w80->UpFunc();
@@ -1262,7 +1270,7 @@ void ContPakWidget::PfsOK(){this->menuState = 2;}
 
 void ContPakWidget::PfsNoPak(){
   WidgetChoiceDia *pWVar1 = FUN_80088aac(FUN_8008a848,&this->handler,1,gGlobals.CommonStrings[0x195],this->pfserr);
-  pWVar1->AppendScrollMenu(pWVar1,ContPakTextWidget(Cstring(ContPakNoSave01),ContPak_8008a738,0x80));
+  pWVar1->AppendScrollMenu(ContPakTextWidget(Cstring(ContPakNoSave01),ContPak_8008a738,0x80));
   pWVar1->Update();
   pWVar1->SetHighlight(1);
 }
@@ -1504,7 +1512,7 @@ BaseWidget * ContPak_8008a738(BaseWidget *param_1,BaseWidget *param_2){
   return NULL;
 }
 
-BaseWidget * ContPak_8008a768(void){
+BaseWidget * ContPak_8008a768(BaseWidget *param_1,BaseWidget *param_2){
   contpak_widget->m8008937c();
   return NULL;
 }

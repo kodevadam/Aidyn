@@ -3,6 +3,17 @@
 #include "globals.h"
 #include "romcopy.h"
 #include "decompress.h"
+#include "endian_swap.h"
+#include <cstdlib>
+#include <cstring>
+
+static inline void swapBorgListing(BorgListing *l) {
+    BE16S(l->Type);
+    BE16S(l->Compression);
+    BE32S(l->compressed);
+    BE32S(l->uncompressed);
+    BE32S(l->Offset);
+}
 
 
 //borg_funcs_a: first step in initalization
@@ -15,11 +26,14 @@ void clearBorgFlag(){borgFlag = false;}
 u32 Ofunc_getBorgTotal(){return borgTotal;}
 
 void SetBorgListing(void *listing,void *files){
-  u32 fileCount[2] ;
-  
+  u32 fileCount[2] __attribute__((aligned(8)));
+
   BorgListingPointer = listing;
   borgFilesPointer = files;
+  fprintf(stderr, "[borg] ROMCOPYS: dest=%p src=%p size=8\n", (void*)fileCount, listing);
   ROMCOPYS(&fileCount,listing,8,252);
+  BE32(fileCount[0]); BE32(fileCount[1]);
+  fprintf(stderr, "[borg] ROMCOPYS done, fileCount[0]=%u fileCount[1]=%u\n", fileCount[0], fileCount[1]);
   borgTotal = fileCount[0];
   ALLOCS(gBorgpointers,fileCount[0] *sizeof(void*),266);
   memset(gBorgpointers,0,fileCount[0] * sizeof(void*));
@@ -27,12 +41,15 @@ void SetBorgListing(void *listing,void *files){
   memset(gBorgBytes,0,fileCount[0]);
   CLEAR(borg_mem);
   CLEAR(borg_count);
+  fprintf(stderr, "[borg] SetBorgListing done, borgTotal=%u\n", borgTotal);
 }
 
 u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compression){
   u8 *compressedDat;
   u32 auStack40[10];
   auStack40[0]= outSize;
+  fprintf(stderr, "[borg] decompressBorg: src=%p compSize=%u dest=%p outSize=%u compression=%u\n",
+          param_1, compSize, borgfile, outSize, compression);
   switch(compression){
     case Compress_None:
       ROMCOPYS(borgfile,param_1,compSize,373);
@@ -49,6 +66,7 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       decompress_LZB(compressedDat,compSize,borgfile,auStack40);
       HFREE(compressedDat,421);
   }
+  fprintf(stderr, "[borg] decompressBorg done\n");
   return true;
 }
 
@@ -57,11 +75,13 @@ s16 get_borg_listing_type(s32 param_1){
   s32 temp [2];
   
   ROMCOPYS(temp,BorgListingPointer,8,446);
+  BE32S(temp[0]); BE32S(temp[1]);
   if ((param_1 < 0) || (temp[0] <= param_1)) {
     listing.Type = -1;
   }
   else {
-    ROMCOPYS(&listing,(void *)((s32)BorgListingPointer + param_1 * 0x10 + 8),0x10,0x1c6);
+    ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + param_1 * 0x10 + 8),0x10,0x1c6);
+    swapBorgListing(&listing);
   }
   return listing.Type;
 }
@@ -74,11 +94,13 @@ s16 GetBorgItemInfo(BorgListing *itemInfo,s32 param_2){ //orphaned, low priority
     CRASH("n64Borg.cpp, GetBorgItemInfo()","itemInfo is not 8 bytes aligned!");
   }
   ROMCOPYS(aiStack88,BorgListingPointer,8,476);
+  BE32S(aiStack88[0]); BE32S(aiStack88[1]);
   if ((param_2 < 0) || (aiStack88[0] <= param_2)) {
     sVar1 = -1;
   }
   else {
-    ROMCOPYS(itemInfo,(void *)((s32)BorgListingPointer + param_2 * 0x10 + 8),0x10,488);
+    ROMCOPYS(itemInfo,(void *)((uintptr_t)BorgListingPointer + param_2 * 0x10 + 8),0x10,488);
+    swapBorgListing(itemInfo);
     sVar1 = itemInfo->Type;
   }
   return sVar1;
@@ -103,20 +125,24 @@ borgHeader * getBorgItem(s32 index){
     CRASH("n64Borg.cpp, GetBorgItem()",errmsg);
   }
   else{
-    ROMCOPYS(&listing,(void *)((s32)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
+    ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
+    swapBorgListing(&listing);
+    fprintf(stderr, "[borg] getBorgItem(%d): Type=%d Compression=%d compressed=%u uncompressed=%u Offset=0x%x\n",
+            index, listing.Type, listing.Compression, listing.compressed, listing.uncompressed, listing.Offset);
     if ((((listing.Type < 3) || (listing.Type == 6)) || (listing.Type == 11)) || (((listing.Type == 12 || (listing.Type == 13)) || (listing.Type == 14)))) {
       if (borgFlag == 0) {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),561);
         if (gBorgBytes[index] == 0) {
           ALLOCS(borgfile,listing.uncompressed,566);
-          decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,
+          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                          borgfile,listing.uncompressed,(s32)listing.Compression);
+          fprintf(stderr, "[borg] calling borg_funcs_a[%d] on borgfile=%p\n", listing.Type, borgfile);
           (*borg_funcs_a[listing.Type])(borgfile);
-          gBorgpointers[index] = borgfile;
+          gBorgpointers[index] = (borgHeader*)borgfile;
           gBorgBytes[index] = 1;
         }
         else {
-          borgfile = gBorgpointers[index];
+          borgfile = (u8*)gBorgpointers[index];
           gBorgBytes[index]++;
         }
         ret->index = index;
@@ -125,7 +151,7 @@ borgHeader * getBorgItem(s32 index){
       else {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),600);
         ALLOCS(borgfile,listing.uncompressed,602);
-        decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
+        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
                        listing.uncompressed,(s32)listing.Compression);
         (*borg_funcs_a[listing.Type])(borgfile);
         gBorgpointers[index] = NULL;
@@ -140,8 +166,8 @@ borgHeader * getBorgItem(s32 index){
         size = gBorgHeaderSizes[type] + listing.uncompressed;
         ALLOCS(ret,size,627);
         bzero(ret,size);
-        decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,
-                       (u8 *)((s32)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
+        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+                       (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                        (s32)listing.Compression);
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
@@ -149,14 +175,14 @@ borgHeader * getBorgItem(s32 index){
         gBorgBytes[index] = 0;
         ret->index = -1;
         ret->unk = 0;
-      } 
+      }
       else {
         if (!gBorgBytes[index]) {
           size = gBorgHeaderSizes[type] + listing.uncompressed;
           ALLOCS(ret,size,653);
           bzero(ret,size);
-          decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,
-                         (u8 *)((s32)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
+          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+                         (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                          (s32)listing.Compression);
           (*borg_funcs_a[listing.Type])(ret);
           (*borg_funcs_b[listing.Type])(ret,0);
@@ -282,21 +308,21 @@ void borg2_func_a(Borg2Data *param_1){
   SetPointer(param_1,unk0x40);
   Gfx **gg =param_1->dsplists;
   for (iVar4 = param_1->dsplistcount; iVar4 != 0; iVar4--) {
-    *gg = (Gfx *)((int)*gg + (int)param_1);
+    *gg = (Gfx *)((uintptr_t)*gg + (uintptr_t)param_1);
     gg++;
   }
   piVar1 = param_1->unk0x3c;
-  piVar3 = (int *)((int)piVar1 + (int)param_1);
+  piVar3 = (int *)((uintptr_t)piVar1 + (uintptr_t)param_1);
   if (piVar1 != NULL) {
     param_1->unk0x3c = piVar3;
-    piVar3[1] = (int)&param_1->alpha + piVar3[1];
+    piVar3[1] = (uintptr_t)&param_1->alpha + piVar3[1];
     iVar4 = *piVar1;
-    piVar3 = (int *)((int)&param_1->alpha + piVar1[2]);
-    piVar1[2] = (int)piVar3;
+    piVar3 = (int *)((uintptr_t)&param_1->alpha + piVar1[2]);
+    piVar1[2] = (uintptr_t)piVar3;
     while (iVar4 != 0) {
       iVar4 += -1;
       if (1 < *piVar3) {
-        piVar3[1] = (int)&param_1->alpha + piVar3[1];
+        piVar3[1] = (uintptr_t)&param_1->alpha + piVar3[1];
       }
       piVar3 = piVar3 + 2;
     }
@@ -321,7 +347,7 @@ u8 borg2_func_b(Borg2Header *param_1,Borg2Data *param_2){
       }
     }
   }
-  guMtxIdentF(&param_1->someMtx);
+  guMtxIdentF(param_1->someMtx);
   return false;
 }
 
@@ -359,7 +385,7 @@ void Borg4_free(borgHeader *param_1){
 //"borg3": only 5 in the game. Seem to be camera perpective configs.
 void borg3_func_a(Borg3Header *param_1){
   param_1->dat.mtx_ = NULL;
-  param_1->dat.viewportP = (Vp *)((int)(param_1->dat.viewportP + 8) + (int)param_1);
+  param_1->dat.viewportP = (Vp *)((uintptr_t)(param_1->dat.viewportP + 8) + (uintptr_t)param_1);
 }
 u8 borg3_func_b(void* x, void* y){return false;}
 
@@ -379,29 +405,29 @@ void borg5_func_a(Borg5Header *b5){
   
   pbVar6 = (b5->dat).transforms;
   if (pbVar6 != NULL) {
-    pbVar6 = (Borg5Transform *)((int)&b5 + (int)&pbVar6);
+    pbVar6 = (Borg5Transform *)((uintptr_t)b5 + (uintptr_t)pbVar6);
     i = (b5->dat).transformCount;
     (b5->dat).transforms = pbVar6;
     for (; i != 0; i--) {
-      pbVar6->links = (Borg5Transform **)((int)(pbVar6->links + 4) + (int)b5);
+      pbVar6->links = (Borg5Transform **)((uintptr_t)(pbVar6->links + 4) + (uintptr_t)b5);
       pbVar6++;
     }
   }
-  if ((b5->dat).unused20) (b5->dat).unused20 = (void *)((int)(b5->dat).unused20 + (int)&b5->dat);
-  if ((b5->dat).borg4i) (b5->dat).borg4i = (s32 *)((int)((b5->dat).borg4i + 4) + (int)b5);
-  if ((b5->dat).borg2i) (b5->dat).borg2i = (s32 *)((int)((b5->dat).borg2i + 4) + (int)b5);
-  if ((b5->dat).borg1i)(b5->dat).borg1i = (s32 *)((int)((b5->dat).borg1i + 4) + (int)b5);
-  if (b5->dat.aniTextures)b5->dat.aniTextures = (Borg5AniTexture *)((int)b5->dat.aniTextures + (int)&b5->dat);
+  if ((b5->dat).unused20) (b5->dat).unused20 = (void *)((uintptr_t)(b5->dat).unused20 + (uintptr_t)&b5->dat);
+  if ((b5->dat).borg4i) (b5->dat).borg4i = (s32 *)((uintptr_t)((b5->dat).borg4i + 4) + (uintptr_t)b5);
+  if ((b5->dat).borg2i) (b5->dat).borg2i = (s32 *)((uintptr_t)((b5->dat).borg2i + 4) + (uintptr_t)b5);
+  if ((b5->dat).borg1i)(b5->dat).borg1i = (s32 *)((uintptr_t)((b5->dat).borg1i + 4) + (uintptr_t)b5);
+  if (b5->dat.aniTextures)b5->dat.aniTextures = (Borg5AniTexture *)((uintptr_t)b5->dat.aniTextures + (uintptr_t)&b5->dat);
   i = (b5->dat).aniTextureCount;
   if (0 < i) {
     Borg5AniTexture* ani = (Borg5AniTexture*)(b5->dat).aniTextures;
     for(;i!=0;i--) {
-      ani->p = (void*)((u32)&b5->dat + (u32)ani->p);
+      ani->p = (void*)((uintptr_t)&b5->dat + (uintptr_t)ani->p);
       ani++;
     }
   }
-  (b5->dat).instructions = (u16 *)((int)((b5->dat).instructions + 8) + (int)b5);
-  (b5->dat).ParticleDat = (Borg5_particle **)((uintptr_t)&b5->dat.ParticleDat->emmiSpeed + (int)(b5->dat).ParticleDat);
+  (b5->dat).instructions = (u16 *)((uintptr_t)((b5->dat).instructions + 8) + (uintptr_t)b5);
+  (b5->dat).ParticleDat = (Borg5_particle **)((uintptr_t)&((Borg5_particle*)b5->dat.ParticleDat)->emmiSpeed + (uintptr_t)(b5->dat).ParticleDat);
 }
 
 u8 InitBorgScene(Borg5Header *param_1,void* x){
@@ -409,7 +435,6 @@ u8 InitBorgScene(Borg5Header *param_1,void* x){
   Borg2Data *pBVar2;
   int *piVar3;
   bool bVar4;
-  void *x;
   Borg4Header *pBVar6;
   Borg2Header *pBVar7;
   Borg1Header *pBVar8;
@@ -822,7 +847,7 @@ u8 borg7_func_b(Borg7Header *param_1,Borg7Data *param_2){
   }
   CLEAR(&param_1->aniChache);
   clearBorgFlag();
-  Borg6Header *pBVar3 = (Borg6Header *)getBorgItem((param_1->dat).sub[0].borg6);
+  pBVar3 = (Borg6Header *)getBorgItem((param_1->dat).sub[0].borg6);
   bVar1 = (param_1->dat).sub[0].borg6;
   psVar2 = param_1->unk18;
   (param_1->aniChache).anis[0] = pBVar3;

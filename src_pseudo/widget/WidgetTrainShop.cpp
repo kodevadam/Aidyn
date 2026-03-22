@@ -12,7 +12,7 @@ BaseWidget* WidgetTrainShop::SetHighlight(u16 h){
   u16 uVar2;
   BaseWidget *ret;
   WSMSub *sub = (WSMSub *)this->scrollMenu->substruct;
-  BaseWidget *ret = NULL;
+  ret = NULL;
   if (sub->numChoices != 0) {
     ret = *sub->items;
     if (ret->varU16 == h) sub->highlight = 0;
@@ -80,3 +80,9 @@ void WidgetTrainShop::SetArrows(){
 WidgetTrainShop::~WidgetTrainShop(){WidgetMenu::~WidgetMenu();}
 
 u32 WidgetTrainShop::GetNumber(){return WidgetN_Other;}
+void WidgetTrainShop::InitMenu(){}
+u32 WidgetTrainShop::unk(){return 0;}
+void WidgetTrainShop::Confirm(u16,u16){}
+void WidgetTrainShop::Purchase(u16,u8){}
+u32 WidgetTrainShop::GetGoldPrice(u16){return 0;}
+s32 WidgetTrainShop::GetExpPrice(u16){return 0;}

@@ -279,9 +279,9 @@ void WidgetMenuPopup(BaseWidget *w) {
   WidgetBorg8* w0=WidgetB8(BORG8_BarterBGShadow);
   w0->SetCoords(5,60);
   w->Link(w0);
-  WidgetBorg8* w0=WidgetB8(BORG8_BarterBG);
-  w0->SetCoords(0,58);
-  w->Link(w0);
+  WidgetBorg8* w0b=WidgetB8(BORG8_BarterBG);
+  w0b->SetCoords(0,58);
+  w->Link(w0b);
   w->SetWidth(140);
   w->fadeIn = widget_left_side_fade_in;
   w->fadeOut = widget_left_side_fade_out;
@@ -418,7 +418,7 @@ WidgetItemDetail::WidgetItemDetail(ArmorInstance *armor)
   CharSheet *pCVar3;
   s16 sVar5;
   FontStruct *pFVar6;
-  Borg8Enum BVar7;
+  Borg8Format BVar7;
   BaseWidget *pBVar10;
   ulong uVar11;
   u8 bVar12;
@@ -580,3 +580,5 @@ BaseWidget* WidgetItemDetail::Control(controller_aidyn*cont){
 WidgetItemDetail::~WidgetItemDetail(){WidgetMenu::~WidgetMenu();}
 
 u32 WidgetItemDetail::GetNumber(){return WidgetN_Other;}
+/* Stub — real impl would display magic stat info from ROM strings */
+void WidgetItemDetail::PrintMagicInfo(u8*){}

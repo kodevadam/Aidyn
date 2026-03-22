@@ -1,3 +1,4 @@
+#pragma once
 #include "widgets/BaseWidget.h"
 
 //these seem to be used for animating parts of the menus.
@@ -6,7 +7,7 @@ class GuiAnimator{
     public:
     f32 unk0;
     f32 spd;
-    inline virtual ~GuiAnimator();
+    virtual ~GuiAnimator();
     virtual void vMethA(s32);
     virtual u32 vMethB(f32);
     
@@ -48,6 +49,8 @@ class GuiAnimatorCB: public GuiAnimatorU1{
   virtual u8 vMethC(f32);
 };
 class GuiAnimatorF: public GuiAnimator{
+  public:
+  virtual ~GuiAnimatorF();
   virtual void vMethA(s32);
   virtual u32 vMethB(f32);
 };

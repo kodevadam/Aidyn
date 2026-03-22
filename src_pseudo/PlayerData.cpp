@@ -1,6 +1,7 @@
 #include "globals.h"
 #include "combat/CombatCamera.h"
 #include "combat/Visuals.h"
+#include "vobjects.h"
 
 #define FILENAME "./src/player.cpp"
 
@@ -840,7 +841,7 @@ void some_player_render_sub(playerData *param_1,SceneData *param_2,vec3f *param_
                  gGlobals.MoonPos.y * 200.0f * gGlobals.brightness * param_1->tintScale,light_count++);
     }
   }
-  passto_InitLight_2(&gGlobals.gameVars.DynamicLights,param_2,&(param_1->collision).pos,param_5);
+  passto_InitLight_2(&gGlobals.gameVars.DynamicLights,param_2,(voxelObject*)&(param_1->collision).pos,param_5);
   light_init_func(param_1,param_2,param_5);
 }
 
@@ -1065,12 +1066,14 @@ void Actor::FreePlayer(playerData *param_1){
 }
 
 
+namespace Actor{
 void remove_flagged_playerdata(){
   for(s16 i=0; i < PHANDLE.max_player;i++) {
     playerData *ppVar2 = &PHANDLE.playerDats[i];
-    if (ppVar2->state) Actor::FreePlayer(ppVar2);
+    if (ppVar2->state) FreePlayer(ppVar2);
    }
 }
+}//namespace Actor
 
 void Actor::ChangeAppearance(playerData *pDat,u32 newBorg7){  
   if (((newBorg7 != pDat->borg7) || (pDat->borg7P == NULL)) &&
