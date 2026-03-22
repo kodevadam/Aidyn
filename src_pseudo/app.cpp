@@ -162,8 +162,8 @@ void AppProc(void *x){
           gfx1 = Graphics::EndList(gfx1);
           gListSizeMax = 0x3200;
           if (gExpPakFlag) gListSizeMax = 0x6400;
-          uVar10 = (u32)((int)gfx1 - (int)gfx0) /sizeof(Gfx);
-          if (gListSizeMax*sizeof(Gfx) < (u32)(gfx1 - (int)gfx0)) {
+          uVar10 = (u32)(gfx1 - gfx0);  /* pointer difference in Gfx units */
+          if (uVar10 > gListSizeMax) {
             Gsprintf("GLIST OVERWRITE!!\nCurrent: %lu\nAllocated: %lu\nOverwrite: %lu",uVar10,gListSizeMax,
                         uVar10 - gListSizeMax);
             CRASH("app.cpp::AppProc",gGlobals.text);
