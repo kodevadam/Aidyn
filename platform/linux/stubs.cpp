@@ -47,29 +47,33 @@ u32 gamestate_cheats2       = 0;
 u32 bitfeild_array[1]       = {0};
 u32 copyrightStrings        = 0; /* TODO: this is u32 not void*, needs special handling - 0xb1ff8f30 */
 
-void* audiokey_rom          = (void*)0x11FF5300;
+void* audiokey_rom          = (void*)0x11EF5310;
 /* N64 ROM symbols – these were linker-placed in ROM, so &symbol gave the
  * ROM address.  On Linux the game code passes these directly (after fixing
  * seed.cpp to drop the &).  Values are N64 physical addresses; DmaRead
  * strips PI_ROM_BASE (0x10000000) to get file offsets. */
 void* borg_files            = (void*)0x100F5DA0; /* ROM offset 0x0F5DA0 */
 void* borg_listings         = (void*)0x11F98790; /* ROM offset 0x1F98790 */
-void* cinematic_titles      = (void*)0x11FFB140;
-void* combat_romstrings     = (void*)0x11FFC4D0;
-void* common_string_array   = (void*)0x11FF6700;
-void* dialouge_entity       = (void*)0x11FE3CE0;
-void* gameStatemod_dat      = (void*)0x11FE4060;
-void* itemDB                = (void*)0x11FDB5E0;
-void* journal_ROM           = (void*)0x11FF90B0;
-void* romstring_controller  = (void*)0x11FFC0C0;
-void* romstring_credits     = (void*)0x11FFD330;
-void* romstring_items       = (void*)0x11FDD7F0;
-void* romstring_potiondetails = (void*)0x11FE04E0;
-void* romstring_skills      = (void*)0x11FDFD50;
-void* romstring_spells      = (void*)0x11FDE9B0;
-void* romstring_stats       = (void*)0x11FDE6C0;
+/* ROM addresses for US v1.1 retail ROM (Rev 1).
+ * Found by scanning — debug build addresses are 0x100000 higher for
+ * data in the upper ROM region.  Lower-region data (borg, itemDB, etc.)
+ * appears to be at the same offsets in both versions. */
+void* cinematic_titles      = (void*)0x11EFB140;
+void* combat_romstrings     = (void*)0x11EFC4D0;
+void* common_string_array   = (void*)0x11EF6710;
+void* dialouge_entity       = (void*)0x11FE3CE0;  /* OK in retail */
+void* gameStatemod_dat      = (void*)0x11FE4060;  /* OK in retail */
+void* itemDB                = (void*)0x11FDB5E0;  /* OK in retail */
+void* journal_ROM           = (void*)0x11EF90B0;
+void* romstring_controller  = (void*)0x11EFC0C0;
+void* romstring_credits     = (void*)0x11EFD330;
+void* romstring_items       = (void*)0x11FDD7F0;  /* OK in retail */
+void* romstring_potiondetails = (void*)0x11FE04E0; /* OK in retail */
+void* romstring_skills      = (void*)0x11FDFD50;  /* OK in retail */
+void* romstring_spells      = (void*)0x11FDE9B0;  /* OK in retail */
+void* romstring_stats       = (void*)0x11FDE6C0;  /* OK in retail */
 void* weapondb              = nullptr;
-void* RomstringPotion       = (void*)0x11FFDA20;
+void* RomstringPotion       = (void*)0x11EFDA20;
 
 mapDataList*     MapDataList_pointer = nullptr;
 EntityDB*        gEntityDB           = nullptr;
