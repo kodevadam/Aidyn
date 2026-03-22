@@ -579,6 +579,9 @@ LAB_800b5474:
 
 //scan image for character sizes
 u8 Font::SetupBorg8(FontStruct *font,Borg8Header *param_2,u16 *sizes,u16 rows,u16 cols){
+  fprintf(stderr, "[font] SetupBorg8: W=%u H=%u fmt=%u offset=%p pal=%p rows=%u cols=%u sizes=%p\n",
+          (param_2->dat).Width, (param_2->dat).Height, (param_2->dat).format,
+          (param_2->dat).offset, (void*)(param_2->dat).palette, rows, cols, (void*)sizes);
   u8 uVar1;
   u16 uVar3;
   u32 charW;

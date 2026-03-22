@@ -63,6 +63,9 @@ Borg8Header* loadBorg8(u32 index){
         b8->dat.format  = (t < 9) ? b1_to_b8[t] : BORG8_RGBA16;
         b8->dat.palette = b1->dat->pallette;
         b8->dat.offset  = (void *)b1->bitmapA;
+        fprintf(stderr, "[loadBorg8] Borg1→Borg8 adapter: index=%u b1type=%u→b8fmt=%u W=%u H=%u bmp=%p pal=%p\n",
+                index, t, b8->dat.format, b8->dat.Width, b8->dat.Height,
+                b8->dat.offset, (void*)b8->dat.palette);
         return b8;
       }
     }
