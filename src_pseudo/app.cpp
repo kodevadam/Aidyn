@@ -121,16 +121,21 @@ void AppProc(void *x){
   ALLOCS(appManager.Mesg,sizeof(OSMesg)*OS_SC_MAX_MESGS,0x117);
   osCreateMesgQueue(&appManager.MesgQ2,appManager.Mesg,8);
   appManager.MesgQ = osScGetCmdQ(appManager.sched);
+  fprintf(stderr, "[app] appProc_init...\n");
   appProc_init();
+  fprintf(stderr, "[app] appProc_init done, registering as scheduler client\n");
   osScAddClient(appManager.sched,&appManager.client,&appManager.MesgQ2);
+  fprintf(stderr, "[app] Entering main loop\n");
   ppsStack_3c = &psStack_40;
   sVar9 = 0;
   while(1) {
     osRecvMesg(&appManager.MesgQ2,(OSMesg*)ppsStack_3c,1);
+    fprintf(stderr, "[app] Got msg state=%d sVar9=%d\n", psStack_40->state, sVar9);
     switch(psStack_40->state){
       case OS_SC_RETRACE_MSG:{
         if ((doubleGlobalTickerFlag == 0) || (sVar9 == 0)) {
          if (Graphics::ResolutionCheck()) {
+          fprintf(stderr, "[app] ResolutionCheck passed, building display list\n");
           Gsprintf("StartGfxList()");
           gfx0 = Graphics::StartGfxList();
           Gsprintf("HandleAppFrame()");
