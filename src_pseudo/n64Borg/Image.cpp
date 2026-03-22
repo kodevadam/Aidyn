@@ -45,6 +45,17 @@ Borg8Header* loadBorg8(u32 index){
   if (listingType == 1) {
     Borg1Header *b1 = (Borg1Header *)item;
     if (b1->dat) {
+      /* Validate: if the parsed Borg1Data fields look invalid, the
+       * borgfile is raw pixel data, not a Borg1 struct.  This happens
+       * for font assets where the decompiled loadBorg8→Borg1 path is
+       * a decompilation error.  Return NULL so the caller can skip. */
+      u16 b1type = b1->dat->type;
+      if (b1type > 8 || (b1->dat->Width == 0 && b1->dat->Height == 0)) {
+        fprintf(stderr, "[loadBorg8] Borg1 index=%u has invalid header (type=%u W=%u H=%u) – raw pixel data, skipping\n",
+                index, b1type, b1->dat->Width, b1->dat->Height);
+        return nullptr;
+      }
+
       Borg8Header *b8;
       ALLOCS(b8, sizeof(Borg8Header), 35);
       if (b8) {
@@ -52,19 +63,15 @@ Borg8Header* loadBorg8(u32 index){
         b8->dat.Width  = (u16)b1->dat->Width;
         b8->dat.Height = (u16)b1->dat->Height;
         b8->dat.unk06  = 0;
-        /* Map Borg1 type enum → Borg8 format enum.
-         * B1: RGBA16=0 IA16=1 CI8=2 IA8=3 I8=4 CI4=5 IA4=6 I4=7 RGBA32=8
-         * B8: RGBA32=1 RGBA16=2 IA16=3 CI8=4 IA8=5 I8=6  CI4=7 IA4=8 I4=9 */
         static const u16 b1_to_b8[] = {
           BORG8_RGBA16, BORG8_IA16, BORG8_CI8, BORG8_IA8,
           BORG8_I8, BORG8_CI4, BORG8_IA4, BORG8_I4, BORG8_RBGA32
         };
-        u16 t = b1->dat->type;
-        b8->dat.format  = (t < 9) ? b1_to_b8[t] : BORG8_RGBA16;
+        b8->dat.format  = (b1type < 9) ? b1_to_b8[b1type] : BORG8_RGBA16;
         b8->dat.palette = b1->dat->pallette;
         b8->dat.offset  = (void *)b1->bitmapA;
         fprintf(stderr, "[loadBorg8] Borg1→Borg8 adapter: index=%u b1type=%u→b8fmt=%u W=%u H=%u bmp=%p pal=%p\n",
-                index, t, b8->dat.format, b8->dat.Width, b8->dat.Height,
+                index, b1type, b8->dat.format, b8->dat.Width, b8->dat.Height,
                 b8->dat.offset, (void*)b8->dat.palette);
         return b8;
       }
