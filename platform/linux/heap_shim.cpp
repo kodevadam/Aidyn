@@ -19,6 +19,7 @@
 #include <cstring>
 #include <cstdio>
 #include <new>
+#include <mutex>
 #include <sys/mman.h>
 
 #include "../../include/memcheck.h"
@@ -56,6 +57,7 @@ static constexpr size_t PB_SZ = sizeof(PoolBlock);
 static u8        *sPool     = nullptr;
 static size_t     sPoolSize = 0;
 static PoolBlock *sFreeList = nullptr;
+static std::mutex sPoolMtx;  /* thread-safety: N64 was single-core */
 
 static inline size_t blk_size(PoolBlock *b)  { return b->size & ~(size_t)1; }
 static inline bool   blk_used(PoolBlock *b)  { return b->size & 1; }
@@ -102,6 +104,7 @@ static size_t align_up(size_t n) {
 
 static void *pool_alloc(size_t user_size) {
     pool_ensure_init();
+    std::lock_guard<std::mutex> lock(sPoolMtx);
     size_t need = align_up(user_size + PB_SZ);
     if (need < PB_SZ + ALIGN) need = PB_SZ + ALIGN; /* minimum block */
 
@@ -128,7 +131,16 @@ static void *pool_alloc(size_t user_size) {
         return (u8 *)b + PB_SZ;
     }
 
-    fprintf(stderr, "[heap] pool_alloc(%zu) FAILED – pool exhausted\n", user_size);
+    /* Dump free-list stats to diagnose exhaustion */
+    size_t total_free = 0, largest_free = 0;
+    int free_count = 0;
+    for (PoolBlock *f = sFreeList; f && free_count < 10000; f = f->next, free_count++) {
+        size_t fsz = blk_size(f);
+        total_free += fsz;
+        if (fsz > largest_free) largest_free = fsz;
+    }
+    fprintf(stderr, "[heap] pool_alloc(%zu) FAILED – need=%zu  free_blocks=%d  total_free=%zu  largest=%zu\n",
+            user_size, need, free_count, total_free, largest_free);
     return nullptr;
 }
 
@@ -143,6 +155,7 @@ static void freelist_remove(PoolBlock *blk) {
 
 static void pool_free(void *ptr) {
     if (!ptr) return;
+    std::lock_guard<std::mutex> lock(sPoolMtx);
     PoolBlock *b = (PoolBlock *)((u8 *)ptr - PB_SZ);
     blk_mark_free(b);
 

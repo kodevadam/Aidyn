@@ -68,9 +68,10 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
        * back-reference distances (~74 KB). */
       static constexpr u32 LZB_PREFIX = 128u * 1024;
       ALLOCS(compressedDat,compSize,407);
+      if (!compressedDat) { fprintf(stderr, "[borg] LZB alloc(%u) FAILED\n", compSize); break; }
       ROMCOPYS(compressedDat,param_1,compSize,411);
       u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize);
-      if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize); break; }
+      if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize); HFREE(compressedDat,421); break; }
       decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
       free(tmpBuf);
