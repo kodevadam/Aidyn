@@ -68,7 +68,11 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       ALLOCS(compressedDat,compSize,407);
       ROMCOPYS(compressedDat,param_1,compSize,411);
       u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize);
+      fprintf(stderr, "[borg] LZB tmpBuf=%p OutDat=%p compressedDat=%p\n",
+              tmpBuf, tmpBuf ? tmpBuf + LZB_PREFIX : nullptr, compressedDat);
+      if (!tmpBuf) { fprintf(stderr, "[borg] calloc FAILED\n"); break; }
       decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      fprintf(stderr, "[borg] LZB decompress done\n");
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
       free(tmpBuf);
       HFREE(compressedDat,421);
