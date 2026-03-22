@@ -17,6 +17,7 @@
 #include <cassert>
 #include <time.h>
 #include <unistd.h>
+#include <atomic>
 #include <signal.h>
 
 /* Include the shim header that declares everything we implement. */
@@ -31,6 +32,10 @@ u32 osTvType = OS_TV_NTSC;  /* default; main() may override from args */
 /* Simple VI mode table – only entries used by the game need to be populated.
  * Index meanings are defined by OS_VI_NTSC_LAN1 etc. in ultra64.h.        */
 OSViMode osViModeTable[16] = {0};
+
+/* Pending graphics task – written by sched_thread, read by main loop.
+ * The main thread owns the OpenGL context, so rendering must happen there. */
+static std::atomic<OSScTask *> sPendingGfxTask{nullptr};
 
 /* =========================================================================
  * Helpers
@@ -313,6 +318,20 @@ static void *sched_thread(void *arg) {
             c = c->next;
         }
         pthread_mutex_unlock(&sc->mutex);
+
+        /* Check for pending graphics tasks from the game thread.
+         * The game sends OSScTask* via osSendMesg to sc->mq (the command queue).
+         * We read it here and post it for the main thread (GL owner) to render. */
+        OSMesg taskMsg = nullptr;
+        while (osRecvMesg(&sc->mq, &taskMsg, OS_MESG_NOBLOCK) == 0) {
+            auto *task = static_cast<OSScTask *>(taskMsg);
+            /* Spin-wait until the main thread has consumed the previous task */
+            while (sPendingGfxTask.load(std::memory_order_acquire) != nullptr) {
+                struct timespec ts = {0, 500000}; /* 0.5 ms */
+                nanosleep(&ts, nullptr);
+            }
+            sPendingGfxTask.store(task, std::memory_order_release);
+        }
     }
     return nullptr;
 }
@@ -326,6 +345,9 @@ extern "C" void osCreateScheduler(OSSched *sc, void *stack, OSPri pri, u8 mode, 
     sc->clientList = nullptr;
     pthread_mutex_init(&sc->mutex, nullptr);
     pthread_cond_init(&sc->retraceCond, nullptr);
+
+    /* Initialise the command queue so game threads can submit tasks */
+    osCreateMesgQueue(&sc->mq, nullptr, OS_SC_MAX_MESGS);
 
     /* Start the scheduler thread */
     auto *ctx = new SchedContext{sc};
@@ -378,6 +400,12 @@ extern "C" void osSpTaskYield(void)             {}
 extern "C" void osSpTaskYieldedQ(OSMesgQueue *) {}
 extern "C" void osSpTaskLoad(OSScTask *)        {}
 extern "C" void osSpTaskStartGo(OSScTask *)     {}
+
+/* Called from the main thread (which owns the GL context) each iteration
+ * of the SDL event loop.  Returns the pending task, or nullptr if none. */
+OSScTask *osScDequeuePendingTask(void) {
+    return sPendingGfxTask.exchange(nullptr, std::memory_order_acq_rel);
+}
 
 /* =========================================================================
  * Controller – stub implementation.

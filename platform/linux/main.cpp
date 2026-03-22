@@ -31,7 +31,7 @@
 /* =========================================================================
  * Forward declarations for backend namespaces
  * ========================================================================= */
-namespace GfxBackend   { bool Init(int w, int h, bool softwareMode = false); void Shutdown(); bool PollEvents(); void StubFrame(unsigned long frameCount); }
+namespace GfxBackend   { bool Init(int w, int h, bool softwareMode = false); void Shutdown(); bool PollEvents(); void StubFrame(unsigned long frameCount); void SubmitFrame(OSScTask *task); }
 #if HAVE_SDL2_MIXER
 namespace AudioBackend { bool Init(int freq);      void Shutdown(); }
 #else
@@ -41,6 +41,9 @@ namespace AudioBackend { inline bool Init(int)  { return false; }
 namespace InputBackend { void Init(); void Shutdown(); bool ProcessEvent(const SDL_Event *ev); }
 namespace AssetLoader  { bool Init(const char *rom); void Shutdown(); }
 namespace SaveFile     { void Init(); }
+
+/* Dequeue a pending graphics task posted by the scheduler (os_impl.cpp) */
+OSScTask *osScDequeuePendingTask(void);
 
 /* =========================================================================
  * Game entry point (defined in src_pseudo/seed.cpp, compiled into game lib)
@@ -278,7 +281,18 @@ int main(int argc, char **argv) {
                     if (ev.type == SDL_QUIT) goto done;
                 }
             }
-            SDL_Delay(1);
+
+            /* Render any pending graphics task from the game thread */
+            OSScTask *task = osScDequeuePendingTask();
+            if (task) {
+                GfxBackend::SubmitFrame(task);
+                /* Send completion message back to the game thread */
+                if (task->msgQ) {
+                    osSendMesg(task->msgQ, task->msg, OS_MESG_NOBLOCK);
+                }
+            } else {
+                SDL_Delay(1);
+            }
         }
     }
 
