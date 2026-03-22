@@ -31,12 +31,14 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
       uVar5 <<= 1;
       if ((uVar5 & 0xff) == 0) break;
       if ((uVar5 >> 8 & 1) == 0) {
+        if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: match flag (bit=0) uVar5=0x%x in=%u out=%d\n", iter, uVar5, uVar6, iVar9);
         goto LAB_800aa428;
       }
 LAB_800aa3e8:
       if (iVar9 >= (s32)maxOut) goto LZB_DONE;
       LZB_CHECK_IN("literal");
       pbVar1 = compDat + uVar6;
+      if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: literal byte=0x%02x in=%u out=%d uVar5=0x%x\n", iter, *pbVar1, uVar6, iVar9, uVar5);
       uVar6++;
       iVar9++;
       *OutDat = *pbVar1;
@@ -44,6 +46,7 @@ LAB_800aa3e8:
     }
     LZB_CHECK_IN("control");
     pbVar1 = compDat + uVar6;
+    if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: new control byte=0x%02x in=%u uVar5_before=0x%x\n", iter, *pbVar1, uVar6, uVar5);
     uVar5 = (u32)*pbVar1 * 2 + 1;
     uVar6++;
     if ((u32)*pbVar1 * 2 >> 8 != 0) goto LAB_800aa3e8;
@@ -73,8 +76,11 @@ LAB_800aa428:
       uVar6++;
     } while ((u32)*pbVar1 * 2 >> 8 == 0);
 LAB_800aa478:
+    if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: elias result iVar7=%d in=%u out=%d\n", iter, iVar7, uVar6, iVar9);
     if (iVar7 != 2) {
       LZB_CHECK_IN("offset-byte");
+      if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: offset extra byte=0x%02x → iVar7=(%d-3)*256+%u=%d\n",
+              iter, compDat[uVar6], iVar7, (u32)compDat[uVar6], (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6]);
       iVar7 = (iVar7 + -3) * 0x100 + (u32)compDat[uVar6];
       uVar6++;
       if (iVar7 == -1) {
@@ -150,6 +156,7 @@ LAB_800aa598:
         return -1;
       }
     }
+    if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
     pbVar1 = OutDat - uVar8;
     iVar9++;
     *OutDat = *pbVar1;

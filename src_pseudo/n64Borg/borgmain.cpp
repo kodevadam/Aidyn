@@ -73,6 +73,19 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       ROMCOPYS(compressedDat,param_1,compSize,411);
       u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize + LZB_SUFFIX);
       if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize + LZB_SUFFIX); HFREE(compressedDat,421); break; }
+      /* Dump compressed input for algorithm tracing */
+      {
+        u8 *c = compressedDat;
+        fprintf(stderr, "[lzb] compressed first 32 bytes: "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                c[0],c[1],c[2],c[3],c[4],c[5],c[6],c[7],
+                c[8],c[9],c[10],c[11],c[12],c[13],c[14],c[15],
+                c[16],c[17],c[18],c[19],c[20],c[21],c[22],c[23],
+                c[24],c[25],c[26],c[27],c[28],c[29],c[30],c[31]);
+      }
       decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
       {
         u8 *out = tmpBuf + LZB_PREFIX;
