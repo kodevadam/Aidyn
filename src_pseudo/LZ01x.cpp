@@ -743,6 +743,8 @@ LAB_800a9e0c:
     uVar8 = (uVar6 >> 5) - 1;
     pbVar5 = pbVar9 + (s32)((u32)*pbVar5 * -8 + (-1 - (uVar6 >> 2 & 7)));
   }
+  fprintf(stderr, "[LZ01] long backref: uVar8=%u pbVar5=%p pbVar9=%p off=%td outPos=%td\n",
+          uVar8, (void*)pbVar5, (void*)pbVar9, pbVar5 - pbVar9, pbVar9 - OutDat);
   *pbVar9 = *pbVar5;
   pbVar4 = pbVar5 + 2;
   pbVar9[1] = pbVar5[1];
