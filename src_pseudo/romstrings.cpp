@@ -43,7 +43,7 @@ char ** Load(void *romAddr,size_t size){
       goto parse_strings;
     }
   }
-  ALLOCS(OutDat,uncompSize,60);
+  ALLOCS(OutDat,uncompSize + 8192,60);  /* extra padding: LZ01 has no output bounds check */
   ALLOCS(dest,size,63);
   ROMCOPYS(dest,romAddr,size,66);
   auStack_28 = 0;
