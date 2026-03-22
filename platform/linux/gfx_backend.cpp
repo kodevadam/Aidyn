@@ -302,7 +302,7 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
         return;
     }
 
-    int maxCmds = 100000; /* safety limit */
+    int maxCmds = 10000; /* safety limit */
     for (; maxCmds > 0; maxCmds--) {
         u8 cmd = (u8)(dl->w.hi >> 24);
         sDLStats[cmd]++;
@@ -476,8 +476,10 @@ void SubmitFrame(OSScTask *task) {
 
         /* Walk the display list attached to the task */
         if (task->list.t.data_ptr) {
-            fprintf(stderr, "[gfx] SubmitFrame: walking DL at %p\n", (void*)task->list.t.data_ptr);
-            process_display_list((Gfx*)task->list.t.data_ptr);
+            Gfx *dlStart = (Gfx*)task->list.t.data_ptr;
+            /* data_size has 32-bit truncation issues; use maxCmds safety limit instead */
+            fprintf(stderr, "[gfx] SubmitFrame: walking DL at %p\n", (void*)dlStart);
+            process_display_list(dlStart);
             fprintf(stderr, "[gfx] SubmitFrame: DL walk complete\n");
         }
 
