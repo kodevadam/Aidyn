@@ -114,7 +114,7 @@ LAB_800aa598:
       iVar7+=2;
     }
     iVar7+= (uVar8 < 0xd01 ^ 1);
-    pbVar1 = OutDat + -uVar8;
+    pbVar1 = OutDat - uVar8;
     iVar9++;
     *OutDat = *pbVar1;
     OutDat++;
@@ -239,7 +239,7 @@ LAB_800aa690:
         iVar7+= 2;
       }
       iVar7+= (uVar8 < 0xd01 ^ 1);
-      pbVar2 = param_3 + -uVar8;
+      pbVar2 = param_3 - uVar8;
       iVar10++;
       *param_3 = *pbVar2;
       param_3++;
@@ -433,7 +433,7 @@ LAB_800aab98:
         iVar13 = iVar13 + 2;
       }
       iVar13 = iVar13 + (uVar14 < 0xd01 ^ 1);
-      pbVar8 = param_3 + -uVar14;
+      pbVar8 = param_3 - uVar14;
       iVar16 = iVar16 + 1;
       *param_3 = *pbVar8;
       param_3 = param_3 + 1;
