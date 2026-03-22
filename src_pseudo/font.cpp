@@ -98,8 +98,13 @@ u8 Font::LoadFace(FontStruct *fontP,u32 b8,u8 rows,u8 cols){
       pFVar7->borgP = pBVar4;
       pBVar4 = fontP->currFont;
       uVar1 = (pBVar4->dat).Width;
-      pFVar7->borgW = uVar1;
       uVar2 = (pBVar4->dat).Height;
+      if (uVar1 == 0 || uVar2 == 0 || !(pBVar4->dat).offset) {
+        fprintf(stderr, "[font] LoadFace: borg %u has invalid dimensions W=%u H=%u offset=%p – skipping\n",
+                b8, uVar1, uVar2, (pBVar4->dat).offset);
+        return false;
+      }
+      pFVar7->borgW = uVar1;
       pFVar7->borgIndex = b8;
       pFVar7->borgH = uVar2;
       pFVar7->charW = uVar1 / cols;

@@ -74,6 +74,18 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize + LZB_SUFFIX);
       if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize + LZB_SUFFIX); HFREE(compressedDat,421); break; }
       decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      {
+        u8 *out = tmpBuf + LZB_PREFIX;
+        fprintf(stderr, "[lzb] decompressed first 32 bytes: "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                out[0],out[1],out[2],out[3],out[4],out[5],out[6],out[7],
+                out[8],out[9],out[10],out[11],out[12],out[13],out[14],out[15],
+                out[16],out[17],out[18],out[19],out[20],out[21],out[22],out[23],
+                out[24],out[25],out[26],out[27],out[28],out[29],out[30],out[31]);
+      }
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
       free(tmpBuf);
       HFREE(compressedDat,421);
@@ -266,6 +278,14 @@ void * Ofunc_getborg(s32 param_1){
  * Parse the N64 binary, allocate a host-layout Borg1Data, and resolve
  * the 32-bit offsets into real pointers. */
 static Borg1Data *borg1_parse_n64(u8 *raw) {
+    fprintf(stderr, "[borg1_parse] raw first 24 bytes: "
+            "%02x %02x %02x %02x %02x %02x %02x %02x "
+            "%02x %02x %02x %02x %02x %02x %02x %02x "
+            "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+            raw[0],raw[1],raw[2],raw[3],raw[4],raw[5],raw[6],raw[7],
+            raw[8],raw[9],raw[10],raw[11],raw[12],raw[13],raw[14],raw[15],
+            raw[16],raw[17],raw[18],raw[19],raw[20],raw[21],raw[22],raw[23]);
+
     Borg1Data *d;
     ALLOCS(d, sizeof(Borg1Data), 258);
     if (!d) return nullptr;
@@ -325,6 +345,9 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
 #endif
 
   header->dat = dat;
+  fprintf(stderr, "[borg1] InitBorgTexture: type=%u flag=0x%x W=%u H=%u bmp=%p pal=%p dList=%p\n",
+          dat->type, dat->flag, dat->Width, dat->Height,
+          (void*)dat->bmp, (void*)dat->pallette, (void*)dat->dList);
   if (!(dat->flag & B1_Procedural)) {
     header->bitmapA = header->bitmapB = dat->bmp;
   }
