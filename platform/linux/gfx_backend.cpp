@@ -288,8 +288,13 @@ enum GbiCmd : u8 {
 static unsigned sDLStats[256] = {};
 static unsigned sDLFrameCount = 0;
 
+static bool ptr_in_pool(uintptr_t addr) {
+    return addr >= 0x40000000 && addr < 0x50000000;
+}
+
 static void process_display_list(const Gfx *dl, int depth = 0) {
     if (!dl || depth > 16) return; /* guard against infinite recursion */
+    if (!ptr_in_pool((uintptr_t)dl)) return; /* invalid DL pointer */
 
     for (;;) {
         u8 cmd = (u8)(dl->w.hi >> 24);
@@ -308,12 +313,17 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             return; /* end of display list */
 
         case GBI_DL: {
-            /* Call sub-display list */
-            uintptr_t addr = (uintptr_t)dl->w.lo;
-            const Gfx *subdl = reinterpret_cast<const Gfx *>(addr);
-            bool branch = (dl->w.hi >> 16) & 0xFF; /* 1 = branch (replace), 0 = call */
-            process_display_list(subdl, depth + 1);
-            if (branch) return;
+            /* Call sub-display list.
+             * The address is in the low 32 bits of w.lo. Pool memory is in
+             * the lower 2GB (MAP_32BIT), so zero-extending gives a valid ptr.
+             * Skip if the address looks invalid. */
+            uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
+            if (addr >= 0x40000000 && addr < 0x50000000) {
+                const Gfx *subdl = reinterpret_cast<const Gfx *>(addr);
+                bool branch = (dl->w.hi >> 16) & 0xFF;
+                process_display_list(subdl, depth + 1);
+                if (branch) return;
+            }
             break;
         }
 
