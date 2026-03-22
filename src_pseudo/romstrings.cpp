@@ -22,7 +22,10 @@ char ** Load(void *romAddr,size_t size){
   ALLOCS(dest,size,63);
   ROMCOPYS(dest,romAddr,size,66);
   auStack_28 = 0;
-  decompress_LZ01(dest + 2,size,(u8 *)OutDat,&auStack_28);
+  fprintf(stderr, "[romstr] LZ01 decompress: uncompSize=%u compSize=%zu dest=%p OutDat=%p\n",
+          auStack_68, size, (void*)dest, (void*)OutDat);
+  decompress_LZ01(dest + 2, size - 2, (u8 *)OutDat, &auStack_28);
+  fprintf(stderr, "[romstr] LZ01 done: outSize=%u\n", auStack_28);
   HFREE(dest,0x4a);
   puVar3 = OutDat + 1;
   auStack_28 = (u32)*OutDat;
