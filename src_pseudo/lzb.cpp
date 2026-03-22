@@ -11,7 +11,7 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
   u32 uVar5 = 0;
   u32 uVar6 = 0;
   s32 iVar7 = 1;
-  u32 uVar8;
+  u32 uVar8 = 1;  /* must be initialized; first iVar7==2 means "reuse" */
   s32 iVar9 = 0;
   u8 *OutDatStart = OutDat;
   u32 maxOut = *outSize;
