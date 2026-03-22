@@ -4,6 +4,8 @@
 #include "romcopy.h"
 #include "decompress.h"
 #include "endian_swap.h"
+#include <cstdlib>
+#include <cstring>
 
 static inline void swapBorgListing(BorgListing *l) {
     BE16S(l->Type);
@@ -58,13 +60,19 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       decompress_LZ01(compressedDat,compSize,borgfile,auStack40);
       HFREE(compressedDat,397);
       break;
-    case Compress_LZB:
+    case Compress_LZB: {
+      /* LZB back-references can extend before the output buffer into a
+       * "dictionary" region.  On N64 this was zeroed RDRAM; on Linux the
+       * heap layout differs, so we provide an explicit zero-filled prefix. */
+      static constexpr u32 LZB_PREFIX = 128u * 1024; /* 128 KB */
       ALLOCS(compressedDat,compSize,407);
       ROMCOPYS(compressedDat,param_1,compSize,411);
-      fprintf(stderr, "[borg] decompress_LZB starting...\n");
-      decompress_LZB(compressedDat,compSize,borgfile,auStack40);
-      fprintf(stderr, "[borg] decompress_LZB done\n");
+      u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize);
+      decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
+      free(tmpBuf);
       HFREE(compressedDat,421);
+    }
   }
   fprintf(stderr, "[borg] decompressBorg done\n");
   return true;

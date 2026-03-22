@@ -1,5 +1,4 @@
 #include "decompress.h"
-#include <cstdio>
 //compession format of most art assets
 
 s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
@@ -12,13 +11,7 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
   s32 iVar7 = 1;
   u32 uVar8;
   s32 iVar9 = 0;
-  u8 *OutDatStart = OutDat;
 
-  fprintf(stderr, "[lzb] decompress_LZB entry: compDat=%p CompSize=%u OutDat=%p outSize=%u\n",
-          compDat, CompSize, OutDat, *outSize);
-  fprintf(stderr, "[lzb] first 8 bytes: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-          compDat[0], compDat[1], compDat[2], compDat[3],
-          compDat[4], compDat[5], compDat[6], compDat[7]);
   do {
     while( true ) {
       uVar5 <<= 1;
@@ -122,10 +115,6 @@ LAB_800aa598:
     }
     iVar7+= (uVar8 < 0xd01 ^ 1);
     pbVar1 = OutDat - uVar8;
-    if (pbVar1 < OutDatStart) {
-      fprintf(stderr, "[lzb] BACKREF UNDERFLOW: OutDat=%p uVar8=%u pbVar1=%p OutDatStart=%p iVar9=%d uVar6=%u\n",
-              OutDat, uVar8, pbVar1, OutDatStart, iVar9, uVar6);
-    }
     iVar9++;
     *OutDat = *pbVar1;
     OutDat++;
