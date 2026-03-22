@@ -229,7 +229,7 @@ int main(int argc, char **argv) {
     /* Decide whether to launch game thread or run in stub mode.
      * Stub mode: stable window at ~60 FPS with no game logic.
      * Useful for verifying the SDL+GL pipeline works on a new system. */
-    const bool stubMode = gConfig.noRom && !romLoaded;
+    const bool stubMode = gConfig.noRom || !romLoaded;
 
     if (stubMode) {
         /* ---- Stub mode: stable window at ~60 FPS, no game logic ---- */
