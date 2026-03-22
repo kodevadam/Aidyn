@@ -34,6 +34,7 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
         goto LAB_800aa428;
       }
 LAB_800aa3e8:
+      if (iVar9 >= (s32)maxOut) goto LZB_DONE;
       LZB_CHECK_IN("literal");
       pbVar1 = compDat + uVar6;
       uVar6++;
@@ -142,6 +143,7 @@ LAB_800aa598:
     *OutDat = *pbVar1;
     OutDat++;
     do {
+      if (iVar9 >= (s32)maxOut) break;
       pbVar1++;
       iVar9++;
       iVar7--;
@@ -149,6 +151,7 @@ LAB_800aa598:
       OutDat++;
     } while (iVar7 != 0);
   } while (iVar9 < (s32)maxOut);
+LZB_DONE:
   *outSize = iVar9;
   return 0;
 #undef LZB_CHECK_IN

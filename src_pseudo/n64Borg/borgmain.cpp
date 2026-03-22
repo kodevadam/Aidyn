@@ -67,11 +67,12 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
        * to match N64 behaviour.  128 KB covers the largest observed
        * back-reference distances (~74 KB). */
       static constexpr u32 LZB_PREFIX = 128u * 1024;
+      static constexpr u32 LZB_SUFFIX = 64u * 1024; /* match copy can overshoot before loop check */
       ALLOCS(compressedDat,compSize,407);
       if (!compressedDat) { fprintf(stderr, "[borg] LZB alloc(%u) FAILED\n", compSize); break; }
       ROMCOPYS(compressedDat,param_1,compSize,411);
-      u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize);
-      if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize); HFREE(compressedDat,421); break; }
+      u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize + LZB_SUFFIX);
+      if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize + LZB_SUFFIX); HFREE(compressedDat,421); break; }
       decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
       free(tmpBuf);
