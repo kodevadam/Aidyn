@@ -159,7 +159,7 @@ borgHeader * getBorgItem(s32 index){
         ALLOCS(ret,size,627);
         bzero(ret,size);
         decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
-                       (u8 *)((s32)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
+                       (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                        (s32)listing.Compression);
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
@@ -167,14 +167,14 @@ borgHeader * getBorgItem(s32 index){
         gBorgBytes[index] = 0;
         ret->index = -1;
         ret->unk = 0;
-      } 
+      }
       else {
         if (!gBorgBytes[index]) {
           size = gBorgHeaderSizes[type] + listing.uncompressed;
           ALLOCS(ret,size,653);
           bzero(ret,size);
           decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
-                         (u8 *)((s32)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
+                         (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                          (s32)listing.Compression);
           (*borg_funcs_a[listing.Type])(ret);
           (*borg_funcs_b[listing.Type])(ret,0);
@@ -300,21 +300,21 @@ void borg2_func_a(Borg2Data *param_1){
   SetPointer(param_1,unk0x40);
   Gfx **gg =param_1->dsplists;
   for (iVar4 = param_1->dsplistcount; iVar4 != 0; iVar4--) {
-    *gg = (Gfx *)((int)*gg + (int)param_1);
+    *gg = (Gfx *)((uintptr_t)*gg + (uintptr_t)param_1);
     gg++;
   }
   piVar1 = param_1->unk0x3c;
-  piVar3 = (int *)((int)piVar1 + (int)param_1);
+  piVar3 = (int *)((uintptr_t)piVar1 + (uintptr_t)param_1);
   if (piVar1 != NULL) {
     param_1->unk0x3c = piVar3;
-    piVar3[1] = (int)&param_1->alpha + piVar3[1];
+    piVar3[1] = (uintptr_t)&param_1->alpha + piVar3[1];
     iVar4 = *piVar1;
-    piVar3 = (int *)((int)&param_1->alpha + piVar1[2]);
-    piVar1[2] = (int)piVar3;
+    piVar3 = (int *)((uintptr_t)&param_1->alpha + piVar1[2]);
+    piVar1[2] = (uintptr_t)piVar3;
     while (iVar4 != 0) {
       iVar4 += -1;
       if (1 < *piVar3) {
-        piVar3[1] = (int)&param_1->alpha + piVar3[1];
+        piVar3[1] = (uintptr_t)&param_1->alpha + piVar3[1];
       }
       piVar3 = piVar3 + 2;
     }
@@ -377,7 +377,7 @@ void Borg4_free(borgHeader *param_1){
 //"borg3": only 5 in the game. Seem to be camera perpective configs.
 void borg3_func_a(Borg3Header *param_1){
   param_1->dat.mtx_ = NULL;
-  param_1->dat.viewportP = (Vp *)((int)(param_1->dat.viewportP + 8) + (int)param_1);
+  param_1->dat.viewportP = (Vp *)((uintptr_t)(param_1->dat.viewportP + 8) + (uintptr_t)param_1);
 }
 u8 borg3_func_b(void* x, void* y){return false;}
 
@@ -397,29 +397,29 @@ void borg5_func_a(Borg5Header *b5){
   
   pbVar6 = (b5->dat).transforms;
   if (pbVar6 != NULL) {
-    pbVar6 = (Borg5Transform *)((int)&b5 + (int)&pbVar6);
+    pbVar6 = (Borg5Transform *)((uintptr_t)b5 + (uintptr_t)pbVar6);
     i = (b5->dat).transformCount;
     (b5->dat).transforms = pbVar6;
     for (; i != 0; i--) {
-      pbVar6->links = (Borg5Transform **)((int)(pbVar6->links + 4) + (int)b5);
+      pbVar6->links = (Borg5Transform **)((uintptr_t)(pbVar6->links + 4) + (uintptr_t)b5);
       pbVar6++;
     }
   }
-  if ((b5->dat).unused20) (b5->dat).unused20 = (void *)((int)(b5->dat).unused20 + (int)&b5->dat);
-  if ((b5->dat).borg4i) (b5->dat).borg4i = (s32 *)((int)((b5->dat).borg4i + 4) + (int)b5);
-  if ((b5->dat).borg2i) (b5->dat).borg2i = (s32 *)((int)((b5->dat).borg2i + 4) + (int)b5);
-  if ((b5->dat).borg1i)(b5->dat).borg1i = (s32 *)((int)((b5->dat).borg1i + 4) + (int)b5);
-  if (b5->dat.aniTextures)b5->dat.aniTextures = (Borg5AniTexture *)((int)b5->dat.aniTextures + (int)&b5->dat);
+  if ((b5->dat).unused20) (b5->dat).unused20 = (void *)((uintptr_t)(b5->dat).unused20 + (uintptr_t)&b5->dat);
+  if ((b5->dat).borg4i) (b5->dat).borg4i = (s32 *)((uintptr_t)((b5->dat).borg4i + 4) + (uintptr_t)b5);
+  if ((b5->dat).borg2i) (b5->dat).borg2i = (s32 *)((uintptr_t)((b5->dat).borg2i + 4) + (uintptr_t)b5);
+  if ((b5->dat).borg1i)(b5->dat).borg1i = (s32 *)((uintptr_t)((b5->dat).borg1i + 4) + (uintptr_t)b5);
+  if (b5->dat.aniTextures)b5->dat.aniTextures = (Borg5AniTexture *)((uintptr_t)b5->dat.aniTextures + (uintptr_t)&b5->dat);
   i = (b5->dat).aniTextureCount;
   if (0 < i) {
     Borg5AniTexture* ani = (Borg5AniTexture*)(b5->dat).aniTextures;
     for(;i!=0;i--) {
-      ani->p = (void*)((u32)&b5->dat + (u32)ani->p);
+      ani->p = (void*)((uintptr_t)&b5->dat + (uintptr_t)ani->p);
       ani++;
     }
   }
-  (b5->dat).instructions = (u16 *)((int)((b5->dat).instructions + 8) + (int)b5);
-  (b5->dat).ParticleDat = (Borg5_particle **)((uintptr_t)&((Borg5_particle*)b5->dat.ParticleDat)->emmiSpeed + (int)(b5->dat).ParticleDat);
+  (b5->dat).instructions = (u16 *)((uintptr_t)((b5->dat).instructions + 8) + (uintptr_t)b5);
+  (b5->dat).ParticleDat = (Borg5_particle **)((uintptr_t)&((Borg5_particle*)b5->dat.ParticleDat)->emmiSpeed + (uintptr_t)(b5->dat).ParticleDat);
 }
 
 u8 InitBorgScene(Borg5Header *param_1,void* x){
