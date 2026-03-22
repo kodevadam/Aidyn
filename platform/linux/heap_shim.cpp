@@ -1,16 +1,25 @@
 /*
- * heap_shim.cpp – Game heap allocator mapped to system malloc/free.
+ * heap_shim.cpp – Game heap backed by a low-address memory pool.
  *
  * Replaces src_pseudo/memcheck.cpp and src_pseudo/heap.cpp entirely.
- * The game uses a custom slab allocator (heapN64.h / HeapAlloc / HeapFree)
- * originally backed by a fixed-size N64 RDRAM region.  On Linux we simply
- * forward to the system heap.
+ *
+ * The original N64 code uses 32-bit pointer arithmetic everywhere:
+ *   (void *)((s32)ptr + offset), (int)ptr, etc.
+ * On 64-bit Linux, system malloc returns addresses above 0x7F0000000000
+ * which are truncated by these casts, producing garbage pointers.
+ *
+ * Solution: allocate ALL game memory from a pool in the lower 2 GB of
+ * virtual address space via mmap(MAP_32BIT).  This guarantees that every
+ * pointer fits in 31 bits, so (s32)/(int)/(u32) casts are lossless.
+ *
+ * The pool uses a simple first-fit free-list allocator with coalescing.
  */
 
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <new>
+#include <sys/mman.h>
 
 #include "../../include/memcheck.h"
 #include "../../include/heapN64.h"
@@ -23,84 +32,204 @@ u16 gExpPakFlag = 0;
 MemMon_struct gMemMonitor = {};
 
 /* =========================================================================
- * MemoryCheck – called by seed.cpp to detect RDRAM size and set up
- * framebuffer/heap pointers in gMemCheckStruct.
+ * Low-address pool allocator
  *
- * We populate the struct with Linux-friendly values so the rest of the
- * initialisation sequence proceeds normally.
+ * We reserve a generous pool via mmap(MAP_32BIT) and manage it with a
+ * simple first-fit free-list.  Freed blocks are coalesced with their
+ * neighbours to reduce fragmentation.
  * ========================================================================= */
 
-/* Framebuffer dimensions (matching SCREEN_WIDTH/HEIGHT in graphics.h) */
-static constexpr int FB_W  = 320;
-static constexpr int FB_H  = 240;
-static constexpr int FB_BPP= 4; /* 32-bit – match expansion pak sizing from memcheck.cpp */
+/* 128 MB pool – far more than the N64's 8 MB, but the game loads/frees
+ * assets repeatedly so we need headroom for fragmentation waste. */
+static constexpr size_t POOL_SIZE = 128 * 1024 * 1024;
+static constexpr size_t ALIGN     = 16; /* allocation alignment */
+
+/* Block header prepended to every allocation (free or in-use).
+ * 'size' includes the header.  Low bit of size = 1 means in-use. */
+struct PoolBlock {
+    size_t size;       /* total block size incl. header; bit 0 = used flag */
+    PoolBlock *next;   /* next in free list (only valid when free) */
+};
+
+static constexpr size_t PB_SZ = sizeof(PoolBlock);
+
+static u8        *sPool     = nullptr;
+static size_t     sPoolSize = 0;
+static PoolBlock *sFreeList = nullptr;
+
+static inline size_t blk_size(PoolBlock *b)  { return b->size & ~(size_t)1; }
+static inline bool   blk_used(PoolBlock *b)  { return b->size & 1; }
+static inline void   blk_mark_used(PoolBlock *b) { b->size |= 1; }
+static inline void   blk_mark_free(PoolBlock *b) { b->size &= ~(size_t)1; }
+static inline PoolBlock *blk_next_phys(PoolBlock *b) {
+    return (PoolBlock *)((u8 *)b + blk_size(b));
+}
+
+static void pool_init(void *base, size_t len) {
+    sPool     = (u8 *)base;
+    sPoolSize = len;
+
+    /* Entire pool is one big free block */
+    sFreeList        = (PoolBlock *)base;
+    sFreeList->size  = len;   /* free (bit 0 = 0) */
+    sFreeList->next  = nullptr;
+}
+
+static size_t align_up(size_t n) {
+    return (n + ALIGN - 1) & ~(ALIGN - 1);
+}
+
+static void *pool_alloc(size_t user_size) {
+    size_t need = align_up(user_size + PB_SZ);
+    if (need < PB_SZ + ALIGN) need = PB_SZ + ALIGN; /* minimum block */
+
+    /* First-fit search */
+    PoolBlock **prev = &sFreeList;
+    for (PoolBlock *b = sFreeList; b; prev = &b->next, b = b->next) {
+        size_t bsz = blk_size(b);
+        if (bsz < need) continue;
+
+        /* Split if remainder is large enough for a new free block */
+        if (bsz >= need + PB_SZ + ALIGN) {
+            PoolBlock *rest = (PoolBlock *)((u8 *)b + need);
+            rest->size = bsz - need;
+            rest->next = b->next;
+            *prev = rest;
+            b->size = need;
+        } else {
+            /* Use entire block */
+            *prev = b->next;
+            need = bsz; /* use full size */
+        }
+
+        blk_mark_used(b);
+        return (u8 *)b + PB_SZ;
+    }
+
+    fprintf(stderr, "[heap] pool_alloc(%zu) FAILED – pool exhausted\n", user_size);
+    return nullptr;
+}
+
+/* Remove 'blk' from free list by scanning for it.
+ * Only needed during coalescing when a neighbour is already free. */
+static void freelist_remove(PoolBlock *blk) {
+    PoolBlock **prev = &sFreeList;
+    for (PoolBlock *b = sFreeList; b; prev = &b->next, b = b->next) {
+        if (b == blk) { *prev = b->next; return; }
+    }
+}
+
+static void pool_free(void *ptr) {
+    if (!ptr) return;
+    PoolBlock *b = (PoolBlock *)((u8 *)ptr - PB_SZ);
+    blk_mark_free(b);
+
+    /* Coalesce with next physical neighbour */
+    PoolBlock *nxt = blk_next_phys(b);
+    if ((u8 *)nxt < sPool + sPoolSize && !blk_used(nxt)) {
+        freelist_remove(nxt);
+        b->size += blk_size(nxt);
+    }
+
+    /* Coalesce with previous physical neighbour (scan for it) */
+    if ((u8 *)b > sPool) {
+        /* Walk from pool start to find block ending right before 'b'.
+         * This is O(n) but acceptable for a game with few allocations. */
+        PoolBlock *scan = (PoolBlock *)sPool;
+        while (scan < b) {
+            PoolBlock *snext = blk_next_phys(scan);
+            if (snext == b && !blk_used(scan)) {
+                freelist_remove(scan);
+                scan->size += blk_size(b);
+                b = scan; /* 'b' is now the merged block */
+                break;
+            }
+            scan = snext;
+        }
+    }
+
+    /* Insert at head of free list */
+    b->next   = sFreeList;
+    sFreeList = b;
+}
+
+/* =========================================================================
+ * MemoryCheck
+ * ========================================================================= */
+
+static constexpr int FB_W   = 320;
+static constexpr int FB_H   = 240;
+static constexpr int FB_BPP = 4;
 static constexpr size_t FB_SIZE = FB_W * FB_H * FB_BPP;
 
-/* Static buffers (N64 used RDRAM directly; on Linux we just malloc them).
- * The two framebuffers are allocated as one contiguous block because the game
- * code assumes they are adjacent (e.g. video_settings clears both with a
- * single memset using FramebufferSize << 1). */
-static u8  *sHeapBuf   = nullptr;
-static u16 *sDepthBuf  = nullptr;
-static u8  *sFBBlock   = nullptr;
-static u8  *sFB[2]     = {};
-
-static constexpr size_t HEAP_SIZE = 8 * 1024 * 1024; /* 8 MB – more than enough */
+static constexpr size_t HEAP_SIZE = 8 * 1024 * 1024;
 
 void MemoryCheck(uintptr_t ramstart, uintptr_t size) {
     (void)ramstart; (void)size;
 
-    /* Allocate backing storage.  Framebuffers are one contiguous block so
-     * that game code which clears both with FramebufferSize<<1 doesn't
-     * overflow into unrelated memory. */
-    sDepthBuf = (u16 *)calloc(FB_W * FB_H, sizeof(u16));
-    sFBBlock  = (u8  *)calloc(FB_SIZE * 2, 1);
-    sFB[0]    = sFBBlock;
-    sFB[1]    = sFBBlock + FB_SIZE;
-    sHeapBuf  = (u8  *)malloc(HEAP_SIZE);
-
-    if (!sDepthBuf || !sFBBlock || !sHeapBuf) {
-        fprintf(stderr, "[heap] MemoryCheck: allocation failed\n");
+    /* Reserve the pool in the lower 2 GB so that (s32)ptr casts in
+     * legacy N64 code don't lose high bits.  MAP_32BIT guarantees
+     * addresses in the first 2 GB of virtual address space. */
+    void *pool = mmap(nullptr, POOL_SIZE,
+                       PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT,
+                       -1, 0);
+    if (pool == MAP_FAILED) {
+        fprintf(stderr, "[heap] mmap(MAP_32BIT, %zu MB) failed\n",
+                POOL_SIZE / (1024*1024));
         exit(1);
     }
 
-    /* Populate the struct that the rest of the game reads */
+    pool_init(pool, POOL_SIZE);
+
+    fprintf(stderr, "[heap] Low-address pool: %p .. %p (%zu MB)\n",
+            pool, (u8 *)pool + POOL_SIZE, POOL_SIZE / (1024*1024));
+
+    /* Allocate fixed buffers from the pool */
+    u16 *depthBuf = (u16 *)pool_alloc(FB_W * FB_H * sizeof(u16));
+    u8  *fbBlock  = (u8  *)pool_alloc(FB_SIZE * 2);
+    u8  *heapBuf  = (u8  *)pool_alloc(HEAP_SIZE);
+
+    if (!depthBuf || !fbBlock || !heapBuf) {
+        fprintf(stderr, "[heap] MemoryCheck: pool allocation failed\n");
+        exit(1);
+    }
+
+    memset(depthBuf, 0, FB_W * FB_H * sizeof(u16));
+    memset(fbBlock,  0, FB_SIZE * 2);
+
     gMemCheckStruct.ramstartVal       = 0;
-    gMemCheckStruct.DepthBuffer       = sDepthBuf;
-    gMemCheckStruct.heapStart         = sHeapBuf;
-    gMemCheckStruct.frameBuffers[0]   = sFB[0];
-    gMemCheckStruct.frameBuffers[1]   = sFB[1];
-    gMemCheckStruct.RamSize           = 8 * 1024 * 1024; /* simulate Expansion Pak */
+    gMemCheckStruct.DepthBuffer       = depthBuf;
+    gMemCheckStruct.heapStart         = heapBuf;
+    gMemCheckStruct.frameBuffers[0]   = fbBlock;
+    gMemCheckStruct.frameBuffers[1]   = fbBlock + FB_SIZE;
+    gMemCheckStruct.RamSize           = 8 * 1024 * 1024;
     gMemCheckStruct.ramVal0           = 0;
     gMemCheckStruct.frameBufferSize0  = (u32)FB_SIZE;
     gMemCheckStruct.mem_free_allocated= (u32)HEAP_SIZE;
     gMemCheckStruct.frameBufferSize1  = (u32)FB_SIZE;
 
-    gExpPakFlag = 1; /* expansion pak "detected" */
+    gExpPakFlag = 1;
 
     fprintf(stderr, "[heap] MemoryCheck complete: heap=%p (%zu MB)\n",
-            sHeapBuf, HEAP_SIZE / (1024*1024));
+            heapBuf, HEAP_SIZE / (1024*1024));
 }
 
 /* =========================================================================
  * HeapInit / HeapAlloc / HeapFree
- *
- * The game calls HeapInit once then allocates with HALLOC / ALLOCS macros.
- * We forward everything to malloc/free so the game's allocator logic still
- * runs but uses real system memory.
  * ========================================================================= */
 
 static constexpr size_t HB_SZ = sizeof(HeapBlock);
 
 void HeapInit(void *start, size_t size) {
-    /* On Linux the heap is already system-managed; just note the intent. */
     (void)start; (void)size;
 }
 
 void *HeapAlloc(size_t size, char *file, u32 line) {
     (void)file; (void)line;
     if (size == 0) size = 1;
-    HeapBlock *hb = (HeapBlock *)malloc(HB_SZ + size);
+    /* Allocate from the low-address pool instead of system malloc */
+    HeapBlock *hb = (HeapBlock *)pool_alloc(HB_SZ + size);
     if (!hb) {
         fprintf(stderr, "[heap] HeapAlloc(%zu) failed\n", size);
         return nullptr;
@@ -116,12 +245,11 @@ void *HeapAlloc(size_t size, char *file, u32 line) {
 void HeapFree(void *ptr, char *file, u32 line) {
     (void)file; (void)line;
     if (!ptr) return;
-    HeapBlock *hb = (HeapBlock *)((u8 *)ptr - HB_SZ);
-    free(hb);
+    pool_free((u8 *)ptr - HB_SZ);
 }
 
 /* =========================================================================
- * MemMon stubs (the game reads memory statistics for the debug display)
+ * MemMon stubs
  * ========================================================================= */
 u32 get_MemFree(void)          { return (u32)HEAP_SIZE; }
 u32 get_memFree_2(void)        { return (u32)HEAP_SIZE; }
@@ -136,9 +264,6 @@ void print_mem_allocated(memPrint *func_, u16 *p) { (void)func_; (void)p; }
 
 /* =========================================================================
  * Global operator new / delete
- *
- * Signatures must match heapN64.h (no noexcept on delete – legacy header).
- * The sized-delete and array overloads are extras not in the header.
  * ========================================================================= */
 void *operator new(size_t size) {
     return HeapAlloc(size, nullptr, 0);

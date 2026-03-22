@@ -75,7 +75,7 @@ s16 get_borg_listing_type(s32 param_1){
     listing.Type = -1;
   }
   else {
-    ROMCOPYS(&listing,(void *)((s32)BorgListingPointer + param_1 * 0x10 + 8),0x10,0x1c6);
+    ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + param_1 * 0x10 + 8),0x10,0x1c6);
     swapBorgListing(&listing);
   }
   return listing.Type;
@@ -94,7 +94,7 @@ s16 GetBorgItemInfo(BorgListing *itemInfo,s32 param_2){ //orphaned, low priority
     sVar1 = -1;
   }
   else {
-    ROMCOPYS(itemInfo,(void *)((s32)BorgListingPointer + param_2 * 0x10 + 8),0x10,488);
+    ROMCOPYS(itemInfo,(void *)((uintptr_t)BorgListingPointer + param_2 * 0x10 + 8),0x10,488);
     swapBorgListing(itemInfo);
     sVar1 = itemInfo->Type;
   }
@@ -120,14 +120,14 @@ borgHeader * getBorgItem(s32 index){
     CRASH("n64Borg.cpp, GetBorgItem()",errmsg);
   }
   else{
-    ROMCOPYS(&listing,(void *)((s32)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
+    ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
     swapBorgListing(&listing);
     if ((((listing.Type < 3) || (listing.Type == 6)) || (listing.Type == 11)) || (((listing.Type == 12 || (listing.Type == 13)) || (listing.Type == 14)))) {
       if (borgFlag == 0) {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),561);
         if (gBorgBytes[index] == 0) {
           ALLOCS(borgfile,listing.uncompressed,566);
-          decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,
+          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                          borgfile,listing.uncompressed,(s32)listing.Compression);
           (*borg_funcs_a[listing.Type])(borgfile);
           gBorgpointers[index] = (borgHeader*)borgfile;
@@ -143,7 +143,7 @@ borgHeader * getBorgItem(s32 index){
       else {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),600);
         ALLOCS(borgfile,listing.uncompressed,602);
-        decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
+        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
                        listing.uncompressed,(s32)listing.Compression);
         (*borg_funcs_a[listing.Type])(borgfile);
         gBorgpointers[index] = NULL;
@@ -158,7 +158,7 @@ borgHeader * getBorgItem(s32 index){
         size = gBorgHeaderSizes[type] + listing.uncompressed;
         ALLOCS(ret,size,627);
         bzero(ret,size);
-        decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,
+        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                        (u8 *)((s32)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                        (s32)listing.Compression);
         (*borg_funcs_a[listing.Type])(ret);
@@ -173,7 +173,7 @@ borgHeader * getBorgItem(s32 index){
           size = gBorgHeaderSizes[type] + listing.uncompressed;
           ALLOCS(ret,size,653);
           bzero(ret,size);
-          decompressBorg((void *)((s32)borgFilesPointer + listing.Offset),listing.compressed,
+          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                          (u8 *)((s32)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                          (s32)listing.Compression);
           (*borg_funcs_a[listing.Type])(ret);

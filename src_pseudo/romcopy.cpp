@@ -63,9 +63,15 @@ u8 RomCopy(void *dest,void *source,u32 len,u32 type,char *cpp,u32 line){
   fprintf(stderr, "[romcopy] RomCopy dest=%p src=%p len=%u type=%u (%s:%u)\n", dest, source, len, type, cpp, line);
   fprintf(stderr, "[romcopy]   dest&7=%lu src&1=%lu len&1=%u\n", (uintptr_t)dest & 7, (uintptr_t)source & 1, len & 1);
   osSendMesg(&romcopyManage.mesgQ0x1dc,NULL,1);
-  if (((u32)dest & 7) == 0) {
-    if (((u32)source & 1) == 0) {
+
+  /* N64 DMA required 8-byte dest alignment, 2-byte src/len alignment.
+   * On Linux we use memcpy which has no alignment constraints, so skip
+   * these checks.  Keep them on N64 builds for hardware correctness. */
+#ifndef __linux__
+  if (((uintptr_t)dest & 7) == 0) {
+    if (((uintptr_t)source & 1) == 0) {
       if ((len & 1) == 0) {
+#endif
         if (1 < type) {
         #if DEBUGVER
           sprintf(acStack160,"type from %s line %lu unrecognized!",cpp,line);
@@ -76,7 +82,7 @@ u8 RomCopy(void *dest,void *source,u32 len,u32 type,char *cpp,u32 line){
         romcopyManage.flag++;
         prVar4 = &romcopyManage.dmaStructs[bVar1];
         prVar4->VAddr = dest;
-        prVar4->devAddr = (u32)source;
+        prVar4->devAddr = (u32)(uintptr_t)source;
         prVar4->bytes = len;
         if (osSendMesg(&romcopyManage.mesgQ0x1c0,(OSMesg)(u32)bVar1,0)) {
           CRASH("u32 RomCopy( u32 pDest_,u32 pSrc_, u32 len_, u32 type_)","Request Queue is full!");
@@ -90,6 +96,7 @@ u8 RomCopy(void *dest,void *source,u32 len,u32 type,char *cpp,u32 line){
           osRecvMesg(&romcopyManage.mesgQ0x1dc,NULL,1);
         }
         return bVar1;
+#ifndef __linux__
       }
       #if DEBUGVER
       pcVar3 = "len from %s line %lu needs to be aligned to 2 bytes!";
@@ -110,6 +117,7 @@ u8 RomCopy(void *dest,void *source,u32 len,u32 type,char *cpp,u32 line){
   sprintf(acStack160,pcVar3,cpp,line);
   CRASH("u32 RomCopy( u32 pDest,u32 pSrc,u32 len,u32 type)",acStack160);
   #endif
+#endif
 }
 
 
