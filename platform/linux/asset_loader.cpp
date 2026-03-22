@@ -118,6 +118,30 @@ bool DmaRead(u32 devAddr, void *vAddr, u32 nbytes) {
     }
 
     memcpy(vAddr, sRomBase + offset, nbytes);
+
+    /* The ROM is big-endian (z64 format).  The N64 CPU (MIPS) was also
+     * big-endian, so game code reads multi-byte values natively.  On
+     * little-endian x86 we must byte-swap 32-bit words so that u32/u16
+     * reads in game code produce correct values.  This matches what N64
+     * emulators do for cart-to-RDRAM DMA on LE hosts. */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    {
+        u32 *w = (u32 *)vAddr;
+        u32 nwords = nbytes / 4;
+        for (u32 i = 0; i < nwords; i++)
+            w[i] = __builtin_bswap32(w[i]);
+        /* Handle trailing bytes (1-3) */
+        u32 tail = nbytes & 3;
+        if (tail) {
+            u8 *p = (u8 *)vAddr + nwords * 4;
+            u8 tmp[4] = {0};
+            for (u32 i = 0; i < tail; i++) tmp[i] = p[i];
+            u32 swapped = __builtin_bswap32(*(u32 *)tmp);
+            memcpy(p, &swapped, tail);
+        }
+    }
+#endif
+
     return true;
 }
 
