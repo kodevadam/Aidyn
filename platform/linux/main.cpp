@@ -136,7 +136,12 @@ static volatile bool gGameRunning = false;
 
 static void *game_thread(void *) {
     gGameRunning = true;
-    InitProc(nullptr);
+    try {
+        InitProc(nullptr);
+    } catch (...) {
+        fprintf(stderr, "[game] EXCEPTION in InitProc!\n");
+    }
+    fprintf(stderr, "[game] InitProc returned (unexpected)\n");
     gGameRunning = false;
     return nullptr;
 }

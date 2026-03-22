@@ -2,6 +2,7 @@
 
 #include "romcopy.h"
 #include "heapN64.h"
+#include <cstdio>
 
 RomcopyManageStruct romcopyManage;
 namespace RomCopy{
@@ -53,7 +54,9 @@ u8 RomCopy(void *dest,void *source,u32 len,u32 type,char *cpp,u32 line){
   char *pcVar3;
   romcopy_struct *prVar4;
   char acStack160 [160];
-  
+
+  fprintf(stderr, "[romcopy] RomCopy dest=%p src=%p len=%u type=%u (%s:%u)\n", dest, source, len, type, cpp, line);
+  fprintf(stderr, "[romcopy]   dest&7=%lu src&1=%lu len&1=%u\n", (uintptr_t)dest & 7, (uintptr_t)source & 1, len & 1);
   osSendMesg(&romcopyManage.mesgQ0x1dc,NULL,1);
   if (((u32)dest & 7) == 0) {
     if (((u32)source & 1) == 0) {

@@ -15,11 +15,13 @@ void clearBorgFlag(){borgFlag = false;}
 u32 Ofunc_getBorgTotal(){return borgTotal;}
 
 void SetBorgListing(void *listing,void *files){
-  u32 fileCount[2] ;
-  
+  u32 fileCount[2] __attribute__((aligned(8)));
+
   BorgListingPointer = listing;
   borgFilesPointer = files;
+  fprintf(stderr, "[borg] ROMCOPYS: dest=%p src=%p size=8\n", (void*)fileCount, listing);
   ROMCOPYS(&fileCount,listing,8,252);
+  fprintf(stderr, "[borg] ROMCOPYS done, fileCount[0]=%u fileCount[1]=%u\n", fileCount[0], fileCount[1]);
   borgTotal = fileCount[0];
   ALLOCS(gBorgpointers,fileCount[0] *sizeof(void*),266);
   memset(gBorgpointers,0,fileCount[0] * sizeof(void*));
@@ -27,6 +29,7 @@ void SetBorgListing(void *listing,void *files){
   memset(gBorgBytes,0,fileCount[0]);
   CLEAR(borg_mem);
   CLEAR(borg_count);
+  fprintf(stderr, "[borg] SetBorgListing done, borgTotal=%u\n", borgTotal);
 }
 
 u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compression){
