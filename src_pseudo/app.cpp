@@ -166,7 +166,10 @@ void AppProc(void *x){
           }
           if (doubleGlobalTickerFlag)doubleGlobalTickerFlag--;
           else {
-            osSendMesg(appManager.MesgQ,Graphics::CreateTask(gfx1,&appManager.MesgQ2),1);
+            { OSScTask *t = Graphics::CreateTask(gfx1,&appManager.MesgQ2);
+              fprintf(stderr, "[app] Sending task %p to sched cmdQ\n", (void*)t);
+              osSendMesg(appManager.MesgQ, (OSMesg)t, 1);
+              fprintf(stderr, "[app] Task sent OK\n"); }
             sVar9++;
           }
          }

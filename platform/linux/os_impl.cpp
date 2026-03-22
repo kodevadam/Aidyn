@@ -319,10 +319,12 @@ static void *sched_thread(void *arg) {
         }
         pthread_mutex_unlock(&sc->mutex);
 
-        /* Check for pending graphics tasks from the game thread.
-         * The game sends OSScTask* via osSendMesg to sc->mq (the command queue).
-         * We read it here and post it for the main thread (GL owner) to render. */
+        /* Check for pending graphics tasks from the game thread. */
         OSMesg taskMsg = nullptr;
+        s32 qSize = (s32)sc->mq.msgs.size();
+        if (qSize > 0 || sc->frameCount <= 3) {
+            fprintf(stderr, "[sched] frame=%u checking cmdQ (size=%d)\n", sc->frameCount, qSize);
+        }
         while (osRecvMesg(&sc->mq, &taskMsg, OS_MESG_NOBLOCK) == 0) {
             auto *task = static_cast<OSScTask *>(taskMsg);
             fprintf(stderr, "[sched] Got task %p from command queue\n", (void*)task);
