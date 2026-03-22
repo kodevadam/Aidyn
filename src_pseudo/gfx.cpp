@@ -284,7 +284,7 @@ u8 Graphics::ResolutionCheck(void){
   
   if (((gGfxManager.Hres[0] == gGfxManager.Hres[1]) && (gGfxManager.Vres[0] == gGfxManager.Vres[1]))
      && (gGfxManager.colordepth[0] == gGfxManager.colordepth[1])) {
-    bVar1 = (u8)gGfxManager.taskTicks < 2;
+    bVar1 = gGfxManager.taskTicks < 2;
   }
   else {
     bVar1 = false;

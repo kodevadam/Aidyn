@@ -325,6 +325,7 @@ static void *sched_thread(void *arg) {
         OSMesg taskMsg = nullptr;
         while (osRecvMesg(&sc->mq, &taskMsg, OS_MESG_NOBLOCK) == 0) {
             auto *task = static_cast<OSScTask *>(taskMsg);
+            fprintf(stderr, "[sched] Got task %p from command queue\n", (void*)task);
             /* Spin-wait until the main thread has consumed the previous task */
             while (sPendingGfxTask.load(std::memory_order_acquire) != nullptr) {
                 struct timespec ts = {0, 500000}; /* 0.5 ms */
