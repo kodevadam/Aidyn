@@ -294,9 +294,13 @@ static bool ptr_in_pool(uintptr_t addr) {
 
 static void process_display_list(const Gfx *dl, int depth = 0) {
     if (!dl || depth > 16) return; /* guard against infinite recursion */
-    if (!ptr_in_pool((uintptr_t)dl)) return; /* invalid DL pointer */
+    if (!ptr_in_pool((uintptr_t)dl)) {
+        fprintf(stderr, "[gfx] DL ptr %p outside pool, skipping\n", (void*)dl);
+        return;
+    }
 
-    for (;;) {
+    int maxCmds = 100000; /* safety limit */
+    for (; maxCmds > 0; maxCmds--) {
         u8 cmd = (u8)(dl->w.hi >> 24);
         sDLStats[cmd]++;
 
