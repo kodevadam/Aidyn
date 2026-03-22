@@ -636,7 +636,7 @@ s32 decompress_LZ01(u8 *compDat,u32 compSize,u8 *OutDat,u32 *OutSize){
     *pbVar9 = bVar1;
     pbVar9 = pbVar9 + 1;
   } while (uVar6 != 0);
-  fprintf(stderr, "[LZ01] after initial literals: compDat=%p pbVar9=%p (wrote %td literals)\n",
+  if (0) fprintf(stderr, "[LZ01] after initial literals: compDat=%p pbVar9=%p (wrote %td literals)\n",
           (void*)compDat, (void*)pbVar9, pbVar9 - OutDat);
   bVar1 = *compDat;
 LAB_800a9dcc:
@@ -646,7 +646,7 @@ LAB_800a9dcc:
   compDat = compDat + 2;
   {
     s32 off = (s32)((u32)*pbVar5 * -4 + (-0x801 - (u32)(bVar1 >> 2)));
-    fprintf(stderr, "[LZ01] short backref: bVar1=0x%02x *pbVar5=0x%02x off=%d pbVar9=%p target=%p\n",
+    if (0) fprintf(stderr, "[LZ01] short backref: bVar1=0x%02x *pbVar5=0x%02x off=%d pbVar9=%p target=%p\n",
             bVar1, *pbVar5, off, (void*)pbVar9, (void*)(pbVar9 + off));
     pbVar4 = pbVar9 + off + 1;
     *pbVar9 = pbVar9[off];
@@ -749,7 +749,7 @@ LAB_800a9e0c:
     uVar8 = (uVar6 >> 5) - 1;
     pbVar5 = pbVar9 + (s32)((u32)*pbVar5 * -8 + (-1 - (uVar6 >> 2 & 7)));
   }
-  fprintf(stderr, "[LZ01] long backref: uVar8=%u pbVar5=%p pbVar9=%p off=%td outPos=%td\n",
+  if (0) fprintf(stderr, "[LZ01] long backref: uVar8=%u pbVar5=%p pbVar9=%p off=%td outPos=%td\n",
           uVar8, (void*)pbVar5, (void*)pbVar9, pbVar5 - pbVar9, pbVar9 - OutDat);
   *pbVar9 = *pbVar5;
   pbVar4 = pbVar5 + 2;

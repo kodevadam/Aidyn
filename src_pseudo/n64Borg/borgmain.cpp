@@ -76,7 +76,7 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       /* Dump compressed input for algorithm tracing */
       {
         u8 *c = compressedDat;
-        fprintf(stderr, "[lzb] compressed first 32 bytes: "
+        if (0) fprintf(stderr, "[lzb] compressed first 32 bytes: "
                 "%02x %02x %02x %02x %02x %02x %02x %02x "
                 "%02x %02x %02x %02x %02x %02x %02x %02x "
                 "%02x %02x %02x %02x %02x %02x %02x %02x "
@@ -89,7 +89,7 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
       {
         u8 *out = tmpBuf + LZB_PREFIX;
-        fprintf(stderr, "[lzb] decompressed first 32 bytes: "
+        if (0) fprintf(stderr, "[lzb] decompressed first 32 bytes: "
                 "%02x %02x %02x %02x %02x %02x %02x %02x "
                 "%02x %02x %02x %02x %02x %02x %02x %02x "
                 "%02x %02x %02x %02x %02x %02x %02x %02x "

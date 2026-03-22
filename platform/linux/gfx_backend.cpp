@@ -285,11 +285,15 @@ enum GbiCmd : u8 {
  * ignored with a comment indicating where real GL code should go.  Fill these
  * in incrementally as the port matures.
  */
+static unsigned sDLStats[256] = {};
+static unsigned sDLFrameCount = 0;
+
 static void process_display_list(const Gfx *dl, int depth = 0) {
     if (!dl || depth > 16) return; /* guard against infinite recursion */
 
     for (;;) {
         u8 cmd = (u8)(dl->w.hi >> 24);
+        sDLStats[cmd]++;
 
         switch ((GbiCmd)cmd) {
         case GBI_SPNOOP:
@@ -459,6 +463,19 @@ void SubmitFrame(OSScTask *task) {
         /* Walk the display list attached to the task */
         if (task->list.t.data_ptr) {
             process_display_list((Gfx*)task->list.t.data_ptr);
+        }
+
+        sDLFrameCount++;
+        if (sDLFrameCount <= 3 || (sDLFrameCount % 300 == 0)) {
+            fprintf(stderr, "[gfx] frame %u DL stats:", sDLFrameCount);
+            for (int i = 0; i < 256; i++) {
+                if (sDLStats[i] > 0)
+                    fprintf(stderr, " %02x:%u", i, sDLStats[i]);
+            }
+            fprintf(stderr, "\n");
+            memset(sDLStats, 0, sizeof(sDLStats));
+        } else {
+            memset(sDLStats, 0, sizeof(sDLStats));
         }
 
         SDL_GL_SwapWindow(sWindow);
