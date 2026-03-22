@@ -48,8 +48,8 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
   u8 *compressedDat;
   u32 auStack40[10];
   auStack40[0]= outSize;
-  fprintf(stderr, "[borg] decompressBorg: src=%p compSize=%u dest=%p outSize=%u compression=%u\n",
-          param_1, compSize, borgfile, outSize, compression);
+  /* fprintf(stderr, "[borg] decompressBorg: src=%p compSize=%u dest=%p outSize=%u compression=%u\n",
+          param_1, compSize, borgfile, outSize, compression); */
   switch(compression){
     case Compress_None:
       ROMCOPYS(borgfile,param_1,compSize,373);
@@ -60,13 +60,24 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       decompress_LZ01(compressedDat,compSize,borgfile,auStack40);
       HFREE(compressedDat,397);
       break;
-    case Compress_LZB:
+    case Compress_LZB: {
+      /* LZB back-references can extend before the output buffer into a
+       * "dictionary" region.  On N64 this was zeroed RDRAM; on Linux the
+       * heap metadata differs, so we provide an explicit zero-filled prefix
+       * to match N64 behaviour.  128 KB covers the largest observed
+       * back-reference distances (~74 KB). */
+      static constexpr u32 LZB_PREFIX = 128u * 1024;
       ALLOCS(compressedDat,compSize,407);
       ROMCOPYS(compressedDat,param_1,compSize,411);
-      decompress_LZB(compressedDat,compSize,borgfile,auStack40);
+      u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize);
+      if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize); break; }
+      decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
+      free(tmpBuf);
       HFREE(compressedDat,421);
+    }
   }
-  fprintf(stderr, "[borg] decompressBorg done\n");
+  /* fprintf(stderr, "[borg] decompressBorg done\n"); */
   return true;
 }
 

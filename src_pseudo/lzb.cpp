@@ -27,10 +27,6 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
 
   do {
     iter++;
-    if (iter <= 5 || (iter % 500 == 0)) {
-      fprintf(stderr, "[lzb] iter=%u in=%u/%u out=%d/%u uVar5=0x%x\n",
-              iter, uVar6, CompSize, iVar9, maxOut, uVar5);
-    }
     while( true ) {
       uVar5 <<= 1;
       if ((uVar5 & 0xff) == 0) break;
@@ -81,8 +77,6 @@ LAB_800aa478:
       iVar7 = (iVar7 + -3) * 0x100 + (u32)compDat[uVar6];
       uVar6++;
       if (iVar7 == -1) {
-        fprintf(stderr, "[lzb] EOS found: in=%u/%u out=%d iter=%u\n",
-                uVar6, CompSize, iVar9, iter);
         *outSize = iVar9;
         if (uVar6 == CompSize) {
           errOut = 0;
@@ -96,10 +90,6 @@ LAB_800aa478:
         return errOut;
       }
       uVar8 = iVar7 + 1;
-      if (iter <= 5) {
-        fprintf(stderr, "[lzb] new offset: iVar7=%d uVar8=%u in=%u out=%d\n",
-                iVar7, uVar8, uVar6, iVar9);
-      }
     }
     uVar5 <<= 1;
     if ((uVar5 & 0xff) == 0) {
@@ -158,7 +148,9 @@ LAB_800aa598:
       *OutDat = *pbVar1;
       OutDat++;
     } while (iVar7 != 0);
-  } while( true );
+  } while (iVar9 < (s32)maxOut);
+  *outSize = iVar9;
+  return 0;
 #undef LZB_CHECK_IN
 }
 
