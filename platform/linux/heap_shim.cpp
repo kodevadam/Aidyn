@@ -33,12 +33,16 @@ MemMon_struct gMemMonitor = {};
 /* Framebuffer dimensions (matching SCREEN_WIDTH/HEIGHT in graphics.h) */
 static constexpr int FB_W  = 320;
 static constexpr int FB_H  = 240;
-static constexpr int FB_BPP= 2; /* 16-bit colour */
+static constexpr int FB_BPP= 4; /* 32-bit – match expansion pak sizing from memcheck.cpp */
 static constexpr size_t FB_SIZE = FB_W * FB_H * FB_BPP;
 
-/* Static buffers (N64 used RDRAM directly; on Linux we just malloc them) */
+/* Static buffers (N64 used RDRAM directly; on Linux we just malloc them).
+ * The two framebuffers are allocated as one contiguous block because the game
+ * code assumes they are adjacent (e.g. video_settings clears both with a
+ * single memset using FramebufferSize << 1). */
 static u8  *sHeapBuf   = nullptr;
 static u16 *sDepthBuf  = nullptr;
+static u8  *sFBBlock   = nullptr;
 static u8  *sFB[2]     = {};
 
 static constexpr size_t HEAP_SIZE = 8 * 1024 * 1024; /* 8 MB – more than enough */
@@ -46,13 +50,16 @@ static constexpr size_t HEAP_SIZE = 8 * 1024 * 1024; /* 8 MB – more than enoug
 void MemoryCheck(uintptr_t ramstart, uintptr_t size) {
     (void)ramstart; (void)size;
 
-    /* Allocate backing storage */
+    /* Allocate backing storage.  Framebuffers are one contiguous block so
+     * that game code which clears both with FramebufferSize<<1 doesn't
+     * overflow into unrelated memory. */
     sDepthBuf = (u16 *)calloc(FB_W * FB_H, sizeof(u16));
-    sFB[0]    = (u8  *)calloc(FB_SIZE, 1);
-    sFB[1]    = (u8  *)calloc(FB_SIZE, 1);
+    sFBBlock  = (u8  *)calloc(FB_SIZE * 2, 1);
+    sFB[0]    = sFBBlock;
+    sFB[1]    = sFBBlock + FB_SIZE;
     sHeapBuf  = (u8  *)malloc(HEAP_SIZE);
 
-    if (!sDepthBuf || !sFB[0] || !sFB[1] || !sHeapBuf) {
+    if (!sDepthBuf || !sFBBlock || !sHeapBuf) {
         fprintf(stderr, "[heap] MemoryCheck: allocation failed\n");
         exit(1);
     }
