@@ -423,7 +423,8 @@ extern "C" s32 osContInit(OSMesgQueue *mq, u8 *bitpattern, OSContStatus *data) {
 }
 
 extern "C" s32 osContStartReadData(OSMesgQueue *mq) {
-    (void)mq;
+    /* Post completion so the caller's osRecvMesg(mq) doesn't block */
+    if (mq) osSendMesg(mq, nullptr, OS_MESG_NOBLOCK);
     return 0;
 }
 
@@ -432,7 +433,11 @@ extern "C" void osContGetReadData(OSContPad *data) {
 }
 
 extern "C" s32 osContSetCh(u8 ch) { (void)ch; return 0; }
-extern "C" s32 osContStartQuery(OSMesgQueue *mq) { (void)mq; return 0; }
+extern "C" s32 osContStartQuery(OSMesgQueue *mq) {
+    /* Post completion so the caller's osRecvMesg(mq) doesn't block */
+    if (mq) osSendMesg(mq, nullptr, OS_MESG_NOBLOCK);
+    return 0;
+}
 extern "C" void osContGetQuery(OSContStatus *data) {
     if (data) memset(data, 0, sizeof(OSContStatus) * MAXCONTROLLERS);
 }
