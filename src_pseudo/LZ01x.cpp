@@ -658,6 +658,12 @@ LAB_800a9f30:
   pbVar9[1] = pbVar4[1];
   pbVar9 = pbVar9 + 2;
 LAB_800a9f80:
+  if (compDat >= pbVar3) {
+    /* Input exhausted — treat as end of stream */
+    *OutSize = (u32)(pbVar9 - OutDat);
+    fprintf(stderr, "[LZ01] EOS (input exhausted): outSize=%u\n", *OutSize);
+    return 0;
+  }
   uVar6 = compDat[-2] & 3;
   if ((compDat[-2] & 3) == 0) {
     bVar1 = *compDat;
