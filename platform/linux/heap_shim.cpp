@@ -65,6 +65,8 @@ static inline PoolBlock *blk_next_phys(PoolBlock *b) {
     return (PoolBlock *)((u8 *)b + blk_size(b));
 }
 
+static void pool_ensure_init(void);
+
 static void pool_init(void *base, size_t len) {
     sPool     = (u8 *)base;
     sPoolSize = len;
@@ -75,11 +77,31 @@ static void pool_init(void *base, size_t len) {
     sFreeList->next  = nullptr;
 }
 
+/* Lazy-init: global constructors may call operator new (and thus
+ * pool_alloc) before MemoryCheck runs.  If the pool isn't set up yet,
+ * create it now. */
+static void pool_ensure_init(void) {
+    if (sPool) return;
+    void *pool = mmap(nullptr, POOL_SIZE,
+                       PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT,
+                       -1, 0);
+    if (pool == MAP_FAILED) {
+        fprintf(stderr, "[heap] mmap(MAP_32BIT, %zu MB) failed in early init\n",
+                POOL_SIZE / (1024*1024));
+        abort();
+    }
+    pool_init(pool, POOL_SIZE);
+    fprintf(stderr, "[heap] Low-address pool (early init): %p .. %p (%zu MB)\n",
+            pool, (u8 *)pool + POOL_SIZE, POOL_SIZE / (1024*1024));
+}
+
 static size_t align_up(size_t n) {
     return (n + ALIGN - 1) & ~(ALIGN - 1);
 }
 
 static void *pool_alloc(size_t user_size) {
+    pool_ensure_init();
     size_t need = align_up(user_size + PB_SZ);
     if (need < PB_SZ + ALIGN) need = PB_SZ + ALIGN; /* minimum block */
 
@@ -167,23 +189,12 @@ static constexpr size_t HEAP_SIZE = 8 * 1024 * 1024;
 void MemoryCheck(uintptr_t ramstart, uintptr_t size) {
     (void)ramstart; (void)size;
 
-    /* Reserve the pool in the lower 2 GB so that (s32)ptr casts in
-     * legacy N64 code don't lose high bits.  MAP_32BIT guarantees
-     * addresses in the first 2 GB of virtual address space. */
-    void *pool = mmap(nullptr, POOL_SIZE,
-                       PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT,
-                       -1, 0);
-    if (pool == MAP_FAILED) {
-        fprintf(stderr, "[heap] mmap(MAP_32BIT, %zu MB) failed\n",
-                POOL_SIZE / (1024*1024));
-        exit(1);
-    }
-
-    pool_init(pool, POOL_SIZE);
+    /* Ensure the low-address pool exists (may already be created by
+     * early operator new calls from global constructors). */
+    pool_ensure_init();
 
     fprintf(stderr, "[heap] Low-address pool: %p .. %p (%zu MB)\n",
-            pool, (u8 *)pool + POOL_SIZE, POOL_SIZE / (1024*1024));
+            sPool, sPool + sPoolSize, sPoolSize / (1024*1024));
 
     /* Allocate fixed buffers from the pool */
     u16 *depthBuf = (u16 *)pool_alloc(FB_W * FB_H * sizeof(u16));
