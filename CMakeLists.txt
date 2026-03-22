@@ -119,8 +119,9 @@ endif()
 
 # Files not yet compilable (add here to exclude until fixed):
 set(GAME_SRCS_EXCLUDE
-  # Example:
-  # src_pseudo/SomeNotYetFixed.cpp
+  # Replaced by platform/linux/heap_shim.cpp:
+  src_pseudo/memcheck.cpp
+  src_pseudo/heap.cpp
 )
 
 file(GLOB_RECURSE GAME_SRCS_ALL
