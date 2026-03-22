@@ -637,8 +637,8 @@ LAB_800a9dcc:
   pbVar5 = compDat + 1;
   if (0xf < uVar6) goto LAB_800a9e0c;
   compDat = compDat + 2;
-  pbVar4 = pbVar9 + (u32)*pbVar5 * -4 + (-0x801 - (u32)(bVar1 >> 2)) + 1;
-  *pbVar9 = pbVar9[(u32)*pbVar5 * -4 + (-0x801 - (u32)(bVar1 >> 2))];
+  pbVar4 = pbVar9 + (s32)((u32)*pbVar5 * -4 + (-0x801 - (u32)(bVar1 >> 2)) + 1);
+  *pbVar9 = pbVar9[(s32)((u32)*pbVar5 * -4 + (-0x801 - (u32)(bVar1 >> 2)))];
   bVar1 = *pbVar4;
   pbVar9 = pbVar9 + 1;
 LAB_800a9f30:
@@ -687,9 +687,9 @@ LAB_800a9e0c:
         uVar8 = iVar7 + 7 + (u32)bVar1;
       }
       compDat = pbVar5 + 2;
-      if (pbVar9 + ((uVar6 & 8) * -0x800 - ((u32)(*pbVar5 >> 2) + (u32)pbVar5[1] * 0x40)) ==
+      if (pbVar9 + (s32)((uVar6 & 8) * -0x800 - ((u32)(*pbVar5 >> 2) + (u32)pbVar5[1] * 0x40)) ==
           pbVar9) {
-        *OutSize = (int)pbVar9 - (int)OutDat;
+        *OutSize = (u32)(pbVar9 - OutDat);
         if (compDat == pbVar3) {
           sVar2 = 0;
         }
@@ -701,8 +701,8 @@ LAB_800a9e0c:
         }
         return sVar2;
       }
-      pbVar5 = pbVar9 + ((uVar6 & 8) * -0x800 - ((u32)(*pbVar5 >> 2) + (u32)pbVar5[1] * 0x40)) +
-               -0x4000;
+      pbVar5 = pbVar9 + (s32)((uVar6 & 8) * -0x800 - ((u32)(*pbVar5 >> 2) + (u32)pbVar5[1] * 0x40) +
+               -0x4000);
     }
     else {
       uVar8 = uVar6 & 0x1f;
@@ -723,13 +723,13 @@ LAB_800a9e0c:
         uVar8 = iVar7 + 0x1f + (u32)bVar1;
       }
       compDat = pbVar5 + 2;
-      pbVar5 = pbVar9 + (-1 - ((u32)(*pbVar5 >> 2) + (u32)pbVar5[1] * 0x40));
+      pbVar5 = pbVar9 + (s32)(-1 - ((u32)(*pbVar5 >> 2) + (u32)pbVar5[1] * 0x40));
     }
   }
   else {
     compDat = pbVar5 + 1;
     uVar8 = (uVar6 >> 5) - 1;
-    pbVar5 = pbVar9 + (u32)*pbVar5 * -8 + (-1 - (uVar6 >> 2 & 7));
+    pbVar5 = pbVar9 + (s32)((u32)*pbVar5 * -8 + (-1 - (uVar6 >> 2 & 7)));
   }
   *pbVar9 = *pbVar5;
   pbVar4 = pbVar5 + 2;
@@ -744,7 +744,7 @@ LAB_800a9e0c:
   } while (uVar8 != 0);
   goto LAB_800a9f80;
 LAB_800a9f14:
-  pbVar4 = pbVar9 + (u32)*pbVar5 * -4 + (-1 - (uVar6 >> 2));
+  pbVar4 = pbVar9 + (s32)((u32)*pbVar5 * -4 + (-1 - (uVar6 >> 2)));
   bVar1 = *pbVar4;
   compDat = pbVar5 + 1;
   goto LAB_800a9f30;
