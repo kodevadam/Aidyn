@@ -472,7 +472,9 @@ void SubmitFrame(OSScTask *task) {
 
         /* Walk the display list attached to the task */
         if (task->list.t.data_ptr) {
+            fprintf(stderr, "[gfx] SubmitFrame: walking DL at %p\n", (void*)task->list.t.data_ptr);
             process_display_list((Gfx*)task->list.t.data_ptr);
+            fprintf(stderr, "[gfx] SubmitFrame: DL walk complete\n");
         }
 
         sDLFrameCount++;
