@@ -47,15 +47,15 @@ char ** Load(void *romAddr,size_t size){
   ALLOCS(dest,size,63);
   ROMCOPYS(dest,romAddr,size,66);
   auStack_28 = 0;
-  decompress_LZ01(dest + 2, size - 2, (u8 *)OutDat, &auStack_28);
-  fprintf(stderr, "[romstr] LZ01 done (u16 header): outSize=%u\n", auStack_28);
-  HFREE(dest,0x4a);
-parse_strings:
+  fprintf(stderr, "[romstr] LZ01 decompress: uncomp=%u comp=%zu compDat=%p out=%p\n",
+          uncompSize, size, (void*)(dest+2), (void*)OutDat);
+  decompress_LZ01(dest + 2, size, (u8 *)OutDat, &auStack_28);
   fprintf(stderr, "[romstr] LZ01 done: outSize=%u\n", auStack_28);
   HFREE(dest,0x4a);
+parse_strings:
   puVar3 = OutDat + 1;
-  auStack_28 = (u32)*OutDat;
-  BE32(auStack_28);  /* string count from decompressed data (also BE) */
+  { u16 tmp = *OutDat; BE16S(tmp); auStack_28 = (u32)tmp; }
+  fprintf(stderr, "[romstr] string count=%u first_string_ptr=%p\n", auStack_28, (void*)puVar3);
   ALLOCS(ret,auStack_28*sizeof(char*),85);
   if (auStack_28 != 0) {
     for(u16 i=0;i<auStack_28;i++) {
