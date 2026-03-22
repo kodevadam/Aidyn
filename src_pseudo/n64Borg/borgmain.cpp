@@ -256,19 +256,74 @@ void * Ofunc_getborg(s32 param_1){
   return **(void ***)((s32)getBorgItem(param_1) + 8);}
 
 //"borg1" is textures.
+
+#ifdef __linux__
+/* N64 Borg1Data disk layout (24 bytes with 4-byte pointers):
+ *   0: u16 type, 2: u16 flag, 4: u8 Width, 5: u8 Height,
+ *   6: u8 lods, 7: u8 move, 8: u32 dList_off, 12: u32 bmp_off,
+ *   16: u32 pallette_off, 20: u32 unk14
+ * Host Borg1Data has 8-byte pointers so it can't overlay the raw data.
+ * Parse the N64 binary, allocate a host-layout Borg1Data, and resolve
+ * the 32-bit offsets into real pointers. */
+static Borg1Data *borg1_parse_n64(u8 *raw) {
+    Borg1Data *d;
+    ALLOCS(d, sizeof(Borg1Data), 258);
+    if (!d) return nullptr;
+
+    u16 type_raw, flag_raw;
+    memcpy(&type_raw, raw + 0, 2);
+    memcpy(&flag_raw, raw + 2, 2);
+    d->type     = be16(type_raw);
+    d->flag     = be16(flag_raw);
+    d->Width    = raw[4];
+    d->Height   = raw[5];
+    d->lods     = raw[6];
+    d->move     = raw[7];
+
+    u32 off_dList, off_bmp, off_pal, unk14;
+    memcpy(&off_dList, raw + 8,  4);
+    memcpy(&off_bmp,   raw + 12, 4);
+    memcpy(&off_pal,   raw + 16, 4);
+    memcpy(&unk14,     raw + 20, 4);
+    off_dList = be32(off_dList);
+    off_bmp   = be32(off_bmp);
+    off_pal   = be32(off_pal);
+    d->unk14  = be32(unk14);
+
+    d->dList    = off_dList ? (Gfx *)(raw + off_dList) : nullptr;
+    d->bmp      = off_bmp   ? (u8  *)(raw + off_bmp)  : nullptr;
+    d->pallette = off_pal   ? (u16 *)(raw + off_pal)   : nullptr;
+
+    return d;
+}
+
+void borg1_func_a(Borg1Data *param_1){
+    /* On Linux the fixup is done in InitBorgTexture via borg1_parse_n64.
+     * Skip the in-place SetPointer calls which would read wrong offsets
+     * from the 64-bit struct overlay. */
+}
+#else
 void borg1_func_a(Borg1Data *param_1){
   CheckSetPointer(param_1,dList);
   CheckSetPointer(param_1,bmp);
   CheckSetPointer(param_1,pallette);
 }
+#endif
 
-u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat){
-  u16 uVar1;
+u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
   Borg1Data *pBVar2;
   u32 size;
   u8 *puVar5;
   int bitDepth;
-  
+
+#ifdef __linux__
+  /* Parse N64 binary layout into a properly-sized host struct */
+  Borg1Data *dat = borg1_parse_n64((u8 *)dat_raw);
+  if (!dat) return false;
+#else
+  Borg1Data *dat = dat_raw;
+#endif
+
   header->dat = dat;
   if (!(dat->flag & B1_Procedural)) {
     header->bitmapA = header->bitmapB = dat->bmp;
