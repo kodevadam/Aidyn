@@ -3,6 +3,15 @@
 #include "globals.h"
 #include "romcopy.h"
 #include "decompress.h"
+#include "endian_swap.h"
+
+static inline void swapBorgListing(BorgListing *l) {
+    BE16S(l->Type);
+    BE16S(l->Compression);
+    BE32S(l->compressed);
+    BE32S(l->uncompressed);
+    BE32S(l->Offset);
+}
 
 
 //borg_funcs_a: first step in initalization
@@ -21,6 +30,7 @@ void SetBorgListing(void *listing,void *files){
   borgFilesPointer = files;
   fprintf(stderr, "[borg] ROMCOPYS: dest=%p src=%p size=8\n", (void*)fileCount, listing);
   ROMCOPYS(&fileCount,listing,8,252);
+  BE32(fileCount[0]); BE32(fileCount[1]);
   fprintf(stderr, "[borg] ROMCOPYS done, fileCount[0]=%u fileCount[1]=%u\n", fileCount[0], fileCount[1]);
   borgTotal = fileCount[0];
   ALLOCS(gBorgpointers,fileCount[0] *sizeof(void*),266);
@@ -60,11 +70,13 @@ s16 get_borg_listing_type(s32 param_1){
   s32 temp [2];
   
   ROMCOPYS(temp,BorgListingPointer,8,446);
+  BE32S(temp[0]); BE32S(temp[1]);
   if ((param_1 < 0) || (temp[0] <= param_1)) {
     listing.Type = -1;
   }
   else {
     ROMCOPYS(&listing,(void *)((s32)BorgListingPointer + param_1 * 0x10 + 8),0x10,0x1c6);
+    swapBorgListing(&listing);
   }
   return listing.Type;
 }
@@ -77,11 +89,13 @@ s16 GetBorgItemInfo(BorgListing *itemInfo,s32 param_2){ //orphaned, low priority
     CRASH("n64Borg.cpp, GetBorgItemInfo()","itemInfo is not 8 bytes aligned!");
   }
   ROMCOPYS(aiStack88,BorgListingPointer,8,476);
+  BE32S(aiStack88[0]); BE32S(aiStack88[1]);
   if ((param_2 < 0) || (aiStack88[0] <= param_2)) {
     sVar1 = -1;
   }
   else {
     ROMCOPYS(itemInfo,(void *)((s32)BorgListingPointer + param_2 * 0x10 + 8),0x10,488);
+    swapBorgListing(itemInfo);
     sVar1 = itemInfo->Type;
   }
   return sVar1;
@@ -107,6 +121,7 @@ borgHeader * getBorgItem(s32 index){
   }
   else{
     ROMCOPYS(&listing,(void *)((s32)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
+    swapBorgListing(&listing);
     if ((((listing.Type < 3) || (listing.Type == 6)) || (listing.Type == 11)) || (((listing.Type == 12 || (listing.Type == 13)) || (listing.Type == 14)))) {
       if (borgFlag == 0) {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),561);
