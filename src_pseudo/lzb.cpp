@@ -138,6 +138,18 @@ LAB_800aa598:
       iVar7+=2;
     }
     iVar7+= (uVar8 < 0xd01 ^ 1);
+    /* Validate back-reference distance: must not read before the
+     * zero-filled prefix that emulates N64 zeroed RDRAM. */
+    {
+      u32 bytesWritten = (u32)(OutDat - OutDatStart);
+      static constexpr u32 LZB_MAX_PREFIX = 128u * 1024;
+      if (uVar8 == 0 || uVar8 > LZB_MAX_PREFIX + bytesWritten) {
+        fprintf(stderr, "[lzb] FATAL: invalid backref dist=%u written=%u prefix=%u in=%u/%u iter=%u\n",
+                uVar8, bytesWritten, LZB_MAX_PREFIX, uVar6, CompSize, iter);
+        *outSize = iVar9;
+        return -1;
+      }
+    }
     pbVar1 = OutDat - uVar8;
     iVar9++;
     *OutDat = *pbVar1;
