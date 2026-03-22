@@ -8,6 +8,11 @@ RomcopyManageStruct romcopyManage;
 namespace RomCopy{
 void Init(OSPri pri,u32 id){
   romcopyManage.stack = (void *)HALLOC(584,0x79);
+  /* Initialise queues here (before starting thread) to avoid a race:
+   * on N64 cooperative threading guaranteed InitQueue ran first, but
+   * on Linux the calling thread may use the queues before the new
+   * thread's InitQueue executes. */
+  InitQueue();
   osCreateThread(&romcopyManage.Thread,id,RomCopy::proc,NULL,&romcopyManage.stack + 584,pri);
   osStartThread(&romcopyManage.Thread);
 }
@@ -19,8 +24,8 @@ void proc(void* p){
   OSIoMesg IOMsg;
   OSMesg TempMsg;
   u32 uStack36;
-  
-  InitQueue();
+
+  /* InitQueue() moved to Init() – see comment there */
   osCreateMesgQueue(&TempQ,&TempMsg,1);
   while(1) {
     osRecvMesg(&romcopyManage.mesgQ0x1c0,(OSMesg *)&uStack36,1);
