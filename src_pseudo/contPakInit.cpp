@@ -12,7 +12,7 @@ u32 appState_ContPakCheck(Gfx **GG) {
   RSPFUNC6(g);
   *GG = g;
   return 0;  /* return to appstate 0 = title/splash */
-#endif
+#else
   Gfx *g = Graphics::StartDisplay(*GG,FULL_SCREENSPACE);
   g = Graphics::SomeOtherInit(g,FULL_SCREENSPACE,0,0,0,0);
    ContPakFunc controller_error_func[]={
@@ -25,6 +25,7 @@ u32 appState_ContPakCheck(Gfx **GG) {
   else g = appState3_TickWidgets(g);
   *GG = N64Print::Draw(g,1);
   return init_controller_data;
+#endif
 }
 
 extern void*romstring_controller;
