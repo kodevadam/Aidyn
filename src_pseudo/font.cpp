@@ -168,7 +168,7 @@ int Font::printSimple(FontStruct *fontP,Gfx **gg,char *txt,int x,int y,float sca
   sVar4 = fontP->charW;
   sVar5 = fontP->charH;
   xCurr = x;
-  if ((fontP->currFont != NULL) && (*txt)) {
+  if ((fontP->currFont != NULL) && fontP->kerning && (*txt)) {
     bVar1 = *txt;
     while( true ) {
       if (bVar1 == '\n') {
@@ -259,7 +259,7 @@ int Font::PrintMain(FontStruct *font,Gfx **gg,char *txt,int posX,int posY,s16 pa
   uStack_58 = (u16)font->charW;
   iVar11 = 0;
   uStack_54 = (u16)font->charH;
-  if ((((font->currFont == NULL) || (iStack_64 <= param_6)) ||
+  if ((((font->currFont == NULL) || (font->kerning == NULL) || (iStack_64 <= param_6)) ||
       (param_10 <= param_8)) || (param_11 <= param_9)) {
     iStack_5c = 0;
   }
@@ -421,7 +421,7 @@ void Font::PrintChara(FontStruct *fontP,Gfx **gg,u8 chara,s32 param_4,int param_
   uVar4 = fontP->charH;
   iVar11 = 0;
 
-  if (fontP->currFont == NULL) return;
+  if (fontP->currFont == NULL || fontP->kerning == NULL) return;
   if (bVar1 == '+') return;
   if (chara == '\n') return;
   if (param_5 < param_7) {
@@ -522,7 +522,7 @@ int Font::GetHeightScaled(FontStruct *font,char *str,int h,int w,float scaleX,fl
   
   iVar8 = 0;
   iVar4 = 0;
-  if ((font->currFont != NULL) && (str != NULL)) {
+  if ((font->currFont != NULL) && font->kerning && (str != NULL)) {
     if (w <= h) return 0;
     if (*str != '\0') {
       iVar9 = ((u16)font->charH * scaleY + 2.0f);
