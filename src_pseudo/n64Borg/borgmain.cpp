@@ -512,7 +512,7 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
   }
   else {
     bitDepth = 2;
-    if (B1_RGBA16 <= dat->type) {
+    if (B1_RGBA16 < dat->type) {  /* original was probably strict < (decompiler showed <=, but 0<=type is always true) */
       if (dat->type == B1_RGBA32) bitDepth=4;
       else CRASH("n64Borg.cpp, InitBorgTexture()",
           "Procedural flag on a texture type other than 32B_RGBA,16B_RGBA/IA!");
