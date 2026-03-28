@@ -272,9 +272,22 @@ borgHeader * getBorgItem(s32 index){
         if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                        (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                        (s32)listing.Compression)) {
-          fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+          fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping\n", index, listing.Type);
           HFREE(ret,628); return NULL;
         }
+        /* Validate decompressed data before pointer fixups — check first 16 bytes of data portion */
+        {
+          u8 *dataPortion = (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]);
+          bool dataEmpty = true;
+          for (u32 i = 0; i < 16 && i < listing.uncompressed; i++) {
+            if (dataPortion[i] != 0) { dataEmpty = false; break; }
+          }
+          if (dataEmpty && listing.uncompressed > 16) {
+            fprintf(stderr, "[borg] index %d Type=%d: decompressed data is empty/zeroed, skipping init\n", index, listing.Type);
+            HFREE(ret,629); return NULL;
+          }
+        }
+        fprintf(stderr, "[borg] index %d Type=%d: calling borg_funcs_a/b\n", index, listing.Type);
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
         gBorgpointers[index] = NULL;
@@ -291,8 +304,20 @@ borgHeader * getBorgItem(s32 index){
           if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                          (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                          (s32)listing.Compression)) {
-            fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+            fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping\n", index, listing.Type);
             HFREE(ret,654); return NULL;
+          }
+          /* Validate decompressed data before pointer fixups */
+          {
+            u8 *dataPortion = (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]);
+            bool dataEmpty = true;
+            for (u32 i = 0; i < 16 && i < listing.uncompressed; i++) {
+              if (dataPortion[i] != 0) { dataEmpty = false; break; }
+            }
+            if (dataEmpty && listing.uncompressed > 16) {
+              fprintf(stderr, "[borg] index %d Type=%d: decompressed data is empty/zeroed, skipping init\n", index, listing.Type);
+              HFREE(ret,655); return NULL;
+            }
           }
           (*borg_funcs_a[listing.Type])(ret);
           (*borg_funcs_b[listing.Type])(ret,0);
