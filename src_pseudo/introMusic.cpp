@@ -7,10 +7,14 @@ u8 NOOP_flag=false;
 void load_intro_music(){
   u8 abStack_18;
   s32 aiStack_14;
-  
+
   gGlobals.titleSplashVars.flag = 1;
   u32 BGM = gExpPakFlag?BORG12_Intro_Exp:BORG12_Intro_NoExp;
   gGlobals.titleSplashVars.introMusic = loadBorg12(BGM);
+  if (!gGlobals.titleSplashVars.introMusic || !gGlobals.titleSplashVars.introMusic->dat) {
+    fprintf(stderr, "[introMusic] intro music failed to load (borg %u), skipping\n", BGM);
+    return;
+  }
   DCM::Add(&abStack_18,&aiStack_14,&(gGlobals.titleSplashVars.introMusic)->dat->sub,0xa5,0x80,1,-1,0);
   gGlobals.titleSplashVars.introMusicDatA = abStack_18;
   gGlobals.titleSplashVars.introMusicDatB = aiStack_14;
