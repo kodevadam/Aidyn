@@ -44,11 +44,15 @@ void init_DBs(void) {
 #else
   fprintf(stderr, "[game] Skipping DB init on Linux (ROM addresses for entitydb/armorDB/spelldb unknown)\n");
 #endif
+#ifndef __linux__
   load_gamestateFunnel();
+#endif
   ALLOC(PARTY,144);
   PARTY->Init();
   SaveEntity::Init();
+#ifndef __linux__
   PARTY->AddMember(IDEntInd(Alaron));
+#endif
   PARTY->Gold=1;
   ALLOC(TerrainPointer,156);
   World::init(TerrainPointer);
