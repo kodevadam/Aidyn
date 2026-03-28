@@ -52,7 +52,7 @@ void* audiokey_rom          = (void*)0x11EF5310;
  * ROM address.  On Linux the game code passes these directly (after fixing
  * seed.cpp to drop the &).  Values are N64 physical addresses; DmaRead
  * strips PI_ROM_BASE (0x10000000) to get file offsets. */
-void* borg_files            = (void*)0x100F5DA0; /* ROM offset 0x0F5DA0 */
+void* borg_files            = (void*)0x100F4940; /* ROM offset 0x0F4940 — found by scanning for valid Borg1 headers */
 void* borg_listings         = (void*)0x11F98790; /* ROM offset 0x1F98790 */
 /* ROM addresses for US v1.1 retail ROM (Rev 1).
  * Found by scanning — debug build addresses are 0x100000 higher for
