@@ -572,13 +572,9 @@ void loadGameBorgScenes(u16 ShortA,u16 ShortB){
   loading_map_data(&MAPCENTER);
   if ((MAPCENTER.borg5_ID == 0) ||
      (uVar21 = 1, MAPCENTER.borg9_id == 0)) {
-    playerData* ppVar9 = gPlayer;
-    if (gGlobals.gameStateA == GameStateA_Combat) {
-      ppVar9 = gGlobals.combatActors[gCombatP->current_Ent->index];
-    }
-    Gsprintf("Center scene not in Borg.\nPlayer Pos: (%3.4f, %3.4f)\nNew Grid: %d-%c%02d",
-      (ppVar9->collision).pos.x,(ppVar9->collision).pos.z,gGlobals.gameVars.mapDatA,gGlobals.gameVars.mapShort1 - 1 + 'A',gGlobals.gameVars.mapShort2);
-    CRASH("LoadGameBorgScenes",gGlobals.text);
+    fprintf(stderr, "[zone] Center scene not in Borg (borg5=%d borg9=%d) — zone data missing\n",
+            MAPCENTER.borg5_ID, MAPCENTER.borg9_id);
+    return;
   }
   uVar22 = (u32)((MAPCENTER.mapPointer)->dat).byte0x1a;
   uVar11 = uVar22 & 1;
