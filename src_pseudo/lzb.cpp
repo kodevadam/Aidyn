@@ -76,7 +76,7 @@ LAB_800aa428:
       uVar6++;
     } while ((u32)*pbVar1 * 2 >> 8 == 0);
 LAB_800aa478:
-    if (0) fprintf(stderr, "[lzb] iter=%u: elias result iVar7=%d in=%u out=%d\n", iter, iVar7, uVar6, iVar9);
+    if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: elias result iVar7=%d in=%u out=%d\n", iter, iVar7, uVar6, iVar9);
     if (iVar7 != 2) {
       LZB_CHECK_IN("offset-byte");
       if (0) fprintf(stderr, "[lzb] iter=%u: offset extra byte=0x%02x → iVar7=(%d-3)*256+%u=%d\n",
@@ -144,19 +144,37 @@ LAB_800aa598:
       iVar7+=2;
     }
     iVar7+= (uVar8 < 0xd01 ^ 1);
-    /* Validate back-reference distance: must not read before the
-     * zero-filled prefix that emulates N64 zeroed RDRAM. */
+    /* Validate back-reference distance */
     {
       u32 bytesWritten = (u32)(OutDat - OutDatStart);
-      static constexpr u32 LZB_MAX_PREFIX = 128u * 1024;
-      if (uVar8 == 0 || uVar8 > LZB_MAX_PREFIX + bytesWritten) {
-        fprintf(stderr, "[lzb] FATAL: invalid backref dist=%u written=%u prefix=%u in=%u/%u iter=%u\n",
-                uVar8, bytesWritten, LZB_MAX_PREFIX, uVar6, CompSize, iter);
+      if (uVar8 == 0) {
+        fprintf(stderr, "[lzb] FATAL: zero distance in=%u/%u iter=%u\n", uVar6, CompSize, iter);
         *outSize = iVar9;
         return -1;
       }
+      if (uVar8 > bytesWritten) {
+        /* Back-reference goes before output start — read from zero prefix if available,
+         * but log it so we can tell if this is expected or a codec bug */
+        static int preOutRefCount = 0;
+        if (preOutRefCount < 5) {
+          fprintf(stderr, "[lzb] WARNING: pre-output backref dist=%u written=%u (reading zeros) in=%u/%u iter=%u\n",
+                  uVar8, bytesWritten, uVar6, CompSize, iter);
+          preOutRefCount++;
+        }
+        /* Allow it if within 128KB prefix, reject if beyond */
+        static constexpr u32 LZB_MAX_PREFIX = 128u * 1024;
+        if (uVar8 > LZB_MAX_PREFIX + bytesWritten) {
+          fprintf(stderr, "[lzb] FATAL: backref dist=%u exceeds prefix+written in=%u/%u iter=%u\n",
+                  uVar8, uVar6, CompSize, iter);
+          *outSize = iVar9;
+          return -1;
+        }
+      }
     }
-    if (0) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
+        return -1;
+      }
+    }
+    if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
     pbVar1 = OutDat - uVar8;
     iVar9++;
     *OutDat = *pbVar1;
