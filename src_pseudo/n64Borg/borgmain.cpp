@@ -205,11 +205,8 @@ borgHeader * getBorgItem(s32 index){
   
   memOld = get_memUsed();
   if ((index >= (s32)borgTotal) || (0 > index)){
-    #if DEBUGVER
-    char errmsg [96];
-    sprintf(errmsg,"item index is out of range (%i/%i)",index,borgTotal - 1);
-    #endif
-    CRASH("n64Borg.cpp, GetBorgItem()",errmsg);
+    fprintf(stderr, "[borg] getBorgItem(%d): index out of range (borgTotal=%u)\n", index, borgTotal);
+    return NULL;
   }
   else{
     ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
