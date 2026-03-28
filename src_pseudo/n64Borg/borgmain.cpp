@@ -94,6 +94,21 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
         HFREE(compressedDat,421);
         return false;
       }
+      /* Check if LZB produced any non-zero output (all-zeros = silent failure) */
+      {
+        u8 *out = tmpBuf + LZB_PREFIX;
+        bool allZero = true;
+        for (u32 i = 0; i < outSize && i < 64; i++) {
+          if (out[i] != 0) { allZero = false; break; }
+        }
+        if (allZero && outSize > 0) {
+          fprintf(stderr, "[borg] LZB produced all-zero output (%u bytes), treating as failure\n", outSize);
+          memset(borgfile, 0, outSize);
+          free(tmpBuf);
+          HFREE(compressedDat,421);
+          return false;
+        }
+      }
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
       free(tmpBuf);
       HFREE(compressedDat,421);
@@ -203,6 +218,7 @@ borgHeader * getBorgItem(s32 index){
       if (borgFlag){
         size = gBorgHeaderSizes[type] + listing.uncompressed;
         ALLOCS(ret,size,627);
+        if (!ret) { fprintf(stderr, "[borg] alloc failed for index %d, skipping\n", index); return NULL; }
         bzero(ret,size);
         if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                        (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
@@ -221,10 +237,14 @@ borgHeader * getBorgItem(s32 index){
         if (!gBorgBytes[index]) {
           size = gBorgHeaderSizes[type] + listing.uncompressed;
           ALLOCS(ret,size,653);
+          if (!ret) { fprintf(stderr, "[borg] alloc failed for index %d, skipping\n", index); return NULL; }
           bzero(ret,size);
-          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+          if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                          (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
-                         (s32)listing.Compression);
+                         (s32)listing.Compression)) {
+            fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+            HFREE(ret,654); return NULL;
+          }
           (*borg_funcs_a[listing.Type])(ret);
           (*borg_funcs_b[listing.Type])(ret,0);
           gBorgpointers[index] = ret;
