@@ -271,8 +271,12 @@ borgHeader * getBorgItem(s32 index){
         if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                        (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
                        (s32)listing.Compression)) {
-          fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping\n", index, listing.Type);
-          HFREE(ret,628); return NULL;
+          fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping. ret=%p\n", index, listing.Type, (void*)ret);
+          fflush(stderr);
+          HFREE(ret,628);
+          fprintf(stderr, "[borg] freed ret for index %d, returning NULL\n", index);
+          fflush(stderr);
+          return NULL;
         }
         /* Validate decompressed data before pointer fixups — check first 16 bytes of data portion */
         {
