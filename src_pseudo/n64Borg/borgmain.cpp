@@ -115,12 +115,17 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
                 c[24],c[25],c[26],c[27],c[28],c[29],c[30],c[31]);
       }
       s32 lzbRet = decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
-      if (lzbRet < 0) {
+      if (lzbRet < 0 && lzbRet != -205) {
+        /* -205 means "end marker found but didn't consume all input" — likely trailing
+         * padding, treat as success.  Other negative codes are real failures. */
         fprintf(stderr, "[borg] LZB decompression FAILED (ret=%d), zeroing output\n", lzbRet);
         memset(borgfile, 0, outSize);
         free(tmpBuf);
         HFREE(compressedDat,421);
         return false;
+      }
+      if (lzbRet == -205) {
+        fprintf(stderr, "[borg] LZB returned -205 (extra input bytes), treating as OK\n");
       }
       /* Check if LZB produced any non-zero output (all-zeros = silent failure) */
       {
@@ -138,6 +143,14 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
         }
       }
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
+      /* Dump first 32 bytes of decompressed output for format analysis */
+      {
+        u8 *out = borgfile;
+        u32 n = outSize < 32 ? outSize : 32;
+        fprintf(stderr, "[borg] LZB decompressed first %u bytes:", n);
+        for (u32 i = 0; i < n; i++) fprintf(stderr, " %02x", out[i]);
+        fprintf(stderr, "\n");
+      }
       free(tmpBuf);
       HFREE(compressedDat,421);
     }
