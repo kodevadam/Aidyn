@@ -43,8 +43,9 @@ void SetBorgListing(void *listing,void *files){
   CLEAR(borg_count);
   fprintf(stderr, "[borg] SetBorgListing done, borgTotal=%u\n", borgTotal);
 
-  /* Diagnostic: dump metadata and first 16 raw ROM bytes for items 26-31 */
-  for (int di = 26; di <= 31 && di < (int)borgTotal; di++) {
+  /* Diagnostic: dump first 5 items AND items 26-31 with raw ROM bytes */
+  for (int di = 0; di <= 31 && di < (int)borgTotal; di++) {
+    if (di > 4 && di < 26) continue; /* skip middle range */
     BorgListing dl;
     ROMCOPYS(&dl, (void *)((uintptr_t)listing + di * sizeof(BorgListing) + 8), sizeof(BorgListing), 253);
     swapBorgListing(&dl);
