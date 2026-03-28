@@ -171,9 +171,6 @@ LAB_800aa598:
         }
       }
     }
-        return -1;
-      }
-    }
     if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
     pbVar1 = OutDat - uVar8;
     iVar9++;
