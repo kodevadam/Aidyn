@@ -174,8 +174,14 @@ borgHeader * getBorgItem(s32 index){
   else{
     ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
     swapBorgListing(&listing);
-    fprintf(stderr, "[borg] getBorgItem(%d): Type=%d Compression=%d compressed=%u uncompressed=%u Offset=0x%x\n",
-            index, listing.Type, listing.Compression, listing.compressed, listing.uncompressed, listing.Offset);
+    {
+      uintptr_t romAddr = (uintptr_t)borgFilesPointer + listing.Offset;
+      uintptr_t fileOff = romAddr - 0x10000000;
+      fprintf(stderr, "[borg] getBorgItem(%d): Type=%d Compression=%d compressed=%u uncompressed=%u "
+              "Offset=0x%x romAddr=0x%lx fileOff=0x%lx\n",
+              index, listing.Type, listing.Compression, listing.compressed, listing.uncompressed,
+              listing.Offset, (unsigned long)romAddr, (unsigned long)fileOff);
+    }
     if ((((listing.Type < 3) || (listing.Type == 6)) || (listing.Type == 11)) || (((listing.Type == 12 || (listing.Type == 13)) || (listing.Type == 14)))) {
       if (borgFlag == 0) {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),561);
@@ -335,6 +341,14 @@ static Borg1Data *borg1_parse_n64(u8 *raw) {
     d->Height   = raw[5];
     d->lods     = raw[6];
     d->move     = raw[7];
+
+    /* Validate: type must be a known BORG1type (0-8) */
+    if (d->type > 8) {
+        fprintf(stderr, "[borg1_parse] INVALID type=%u (raw bytes: %02x %02x) — not a Borg1Data header\n",
+                d->type, raw[0], raw[1]);
+        HFREE(d, 259);
+        return nullptr;
+    }
 
     u32 off_dList, off_bmp, off_pal, unk14;
     memcpy(&off_dList, raw + 8,  4);
