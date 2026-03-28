@@ -22,7 +22,13 @@ void load_intro_music(){
 
 s32 appState_0(Gfx **param_1){
   u8 bVar2;
-  
+
+#ifdef __linux__
+  /* Skip splash screen on Linux — borg scenes/textures can't render yet,
+   * and the controller thread may not be feeding input to advance timers. */
+  fprintf(stderr, "[appState_0] Skipping splash screen on Linux\n");
+  return 1;
+#endif
   while (WHANDLE->GetTail()) WHANDLE->Tick(1);
   if (intro_music_flag) {
     load_intro_music();
