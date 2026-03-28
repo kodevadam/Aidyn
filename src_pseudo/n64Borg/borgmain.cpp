@@ -58,34 +58,40 @@ void SetBorgListing(void *listing,void *files){
             raw[0],raw[1],raw[2],raw[3],raw[4],raw[5],raw[6],raw[7],
             raw[8],raw[9],raw[10],raw[11],raw[12],raw[13],raw[14],raw[15]);
   }
-  /* Scan ROM for correct borg_files base address.
-   * Item 28 is Type=1, Compression=0 (uncompressed), so its raw ROM bytes
-   * must start with a valid Borg1Data header (type 0-8, non-zero W/H). */
+  /* Fine-grained scan: check ±64KB from current borg_files, every 4 bytes */
   {
     BorgListing dl;
     ROMCOPYS(&dl, (void *)((uintptr_t)listing + 28 * sizeof(BorgListing) + 8), sizeof(BorgListing), 255);
     swapBorgListing(&dl);
-    u32 itemOffset = dl.Offset;  /* 0x68E940 */
-    fprintf(stderr, "[borg-scan] Scanning ROM for correct borg_files (item 28 Offset=0x%x)...\n", itemOffset);
+    u32 itemOffset = dl.Offset;
+    uintptr_t curBase = (uintptr_t)files;
+    fprintf(stderr, "[borg-scan] Fine scan ±64KB from borg_files=0x%lx for item 28 (Off=0x%x)...\n",
+            (unsigned long)curBase, itemOffset);
     int found = 0;
-    /* ROM is 32MB, scan every 16-byte aligned candidate */
-    for (u32 baseOff = 0; baseOff + itemOffset + 8 < 0x2000000; baseOff += 16) {
-      u8 hdr[8];
-      ROMCOPYS(hdr, (void *)((uintptr_t)0x10000000 + baseOff + itemOffset), 8, 257);
+    for (s32 delta = -65536; delta <= 65536; delta += 4) {
+      uintptr_t testBase = curBase + delta;
+      uintptr_t testAddr = testBase + itemOffset;
+      u32 testFileOff = (u32)(testAddr - 0x10000000);
+      if (testFileOff + 8 >= 0x2000000) continue;
+      u8 hdr[24];
+      ROMCOPYS(hdr, (void *)testAddr, 24, 257);
       u16 type = ((u16)hdr[0] << 8) | hdr[1];
       u8 width = hdr[4];
       u8 height = hdr[5];
-      if (type <= 8 && width > 0 && width <= 128 && height > 0 && height <= 128) {
-        u16 flag = ((u16)hdr[2] << 8) | hdr[3];
-        fprintf(stderr, "[borg-scan] CANDIDATE: borg_files=0x%08x (fileOff=0x%06x) → "
-                "type=%u flag=0x%04x W=%u H=%u raw=%02x%02x%02x%02x%02x%02x%02x%02x\n",
-                0x10000000 + baseOff, baseOff, type, flag, width, height,
-                hdr[0],hdr[1],hdr[2],hdr[3],hdr[4],hdr[5],hdr[6],hdr[7]);
+      if (type <= 8 && width > 0 && height > 0) {
+        u32 bmpOff = ((u32)hdr[12] << 24) | ((u32)hdr[13] << 16) | ((u32)hdr[14] << 8) | hdr[15];
+        /* bmp offset should be within the 2104-byte blob (24 < bmpOff < 2104) */
+        if (bmpOff < 24 || bmpOff > 4096) continue; /* filter noise */
+        fprintf(stderr, "[borg-scan] MATCH: delta=%+d base=0x%lx fileOff=0x%x → type=%u W=%u H=%u bmpOff=0x%x "
+                "raw=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                delta, (unsigned long)testBase, testFileOff, type, width, height, bmpOff,
+                hdr[0],hdr[1],hdr[2],hdr[3],hdr[4],hdr[5],hdr[6],hdr[7],
+                hdr[8],hdr[9],hdr[10],hdr[11],hdr[12],hdr[13],hdr[14],hdr[15]);
         found++;
-        if (found >= 20) { fprintf(stderr, "[borg-scan] ... (stopped at 20 candidates)\n"); break; }
+        if (found >= 10) break;
       }
     }
-    if (found == 0) fprintf(stderr, "[borg-scan] No valid borg_files candidates found!\n");
+    if (found == 0) fprintf(stderr, "[borg-scan] No matches in ±64KB range\n");
   }
 }
 
