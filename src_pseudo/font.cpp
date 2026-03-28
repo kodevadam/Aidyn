@@ -472,7 +472,7 @@ int Font::GetWidth(FontStruct *param_1,char *txt){
 
 int Font::GetWidthScaled(FontStruct *font,char *txt,float scale){
   int w = 0;
-  if (font->currFont) {
+  if (font->currFont && font->kerning) {
     while(*txt) {
       u8 c = *txt;
       if ((struct_unk_.textIndexies[c - ' '] != 43) && (c != '\n'))
@@ -486,7 +486,7 @@ int Font::GetWidthScaled(FontStruct *font,char *txt,float scale){
 
 
 u16 Font::GetCharWidth(FontStruct *param_1,u8 chara){
-  if (param_1->currFont == NULL) return 0;
+  if (param_1->currFont == NULL || param_1->kerning == NULL) return 0;
   if ((struct_unk_.textIndexies[chara - ' '] != 43) && (chara != '\n')) {
     return param_1->kerning[struct_unk_.textIndexies[chara - ' ']];
   }
@@ -495,7 +495,7 @@ u16 Font::GetCharWidth(FontStruct *param_1,u8 chara){
 
 
 int Font::GetCharWidthScaled(FontStruct *param_1,char chara,float scale){
-  if (param_1->currFont == NULL) return 0;
+  if (param_1->currFont == NULL || param_1->kerning == NULL) return 0;
   if ((struct_unk_.textIndexies[(u8)chara - ' '] != 43) && (chara != '\n')) {
     return (param_1->kerning[struct_unk_.textIndexies[(u8)chara - ' ']] * scale);
   }
