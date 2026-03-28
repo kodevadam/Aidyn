@@ -333,8 +333,11 @@ borgHeader * getBorgItem(s32 index){
     }
     borg_mem[listing.Type]+= (get_memUsed() - memOld);
     borg_count[listing.Type]++;
+    fprintf(stderr, "[borg] getBorgItem(%d) returning %p (Type=%d)\n", index, (void*)ret, listing.Type);
     return ret;
   }
+  fprintf(stderr, "[borg] getBorgItem(%d) returning NULL (fell through)\n", index);
+  return NULL;
 }
 
 //based on older builds, would originally print out memory used by category of Borg
