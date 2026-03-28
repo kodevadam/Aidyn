@@ -24,13 +24,7 @@ WidgetCredits* gCreditsWidget=NULL;
 void init_DBs(void) {
   N64Print::Init(&gGlobals.DebugQueue);
   init_sfx_struct(&gGlobals.SFXStruct);
-#ifdef __linux__
-  /* TODO: entitydb, armorDB, spelldb, weapondb ROM addresses are unknown.
-   * Skip DB initialization until they're found by ROM scanning.
-   * The game won't have entity/item/spell data but won't crash. */
-  fprintf(stderr, "[game] Skipping DB init on Linux (ROM addresses for entitydb/armorDB/spelldb unknown)\n");
-  return;
-#endif
+#ifndef __linux__
   ALLOC(gSpellDBp,122);
   ALLOC(gWeaponsDB,123);
   ALLOC(gItemDBp,124);
@@ -47,6 +41,9 @@ void init_DBs(void) {
   gChestDBp->Init();
   gShopDBP->Init();
   gDialogEntityDBp->Init();
+#else
+  fprintf(stderr, "[game] Skipping DB init on Linux (ROM addresses for entitydb/armorDB/spelldb unknown)\n");
+#endif
   load_gamestateFunnel();
   ALLOC(PARTY,144);
   PARTY->Init();
@@ -78,6 +75,7 @@ void clear_DBs(void) {
 #define FREEDB(db,line)db->Free();HFREE(db,line)
   N64Print::Free();
   sfx_struct_free(&gGlobals.SFXStruct);
+#ifndef __linux__
   FREEDB(gDialogEntityDBp,227);
   FREEDB(gShopDBP,229);
   FREEDB(gChestDBp,231);
@@ -86,6 +84,7 @@ void clear_DBs(void) {
   FREEDB(gItemDBp,237);
   FREEDB(gWeaponsDB,239);
   FREEDB(gSpellDBp,241);
+#endif
   FREEDB(PARTY,245);
   PARTY = NULL;
   FREE(TerrainPointer,249);

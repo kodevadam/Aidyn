@@ -237,7 +237,8 @@ void Cinematic::LoadNextScene(void){
     if (gGlobals.cinematic.borg12enums[gGlobals.cinematic.tally] != -1) {
       gGlobals.cinematic.BGM =
            loadBorg12(gGlobals.cinematic.borg12enums[gGlobals.cinematic.tally]);
-      DCM::Add(&gGlobals.cinematic.BGIndex,&gGlobals.cinematic.BGId,
+      if (gGlobals.cinematic.BGM && gGlobals.cinematic.BGM->dat)
+        DCM::Add(&gGlobals.cinematic.BGIndex,&gGlobals.cinematic.BGId,
                &(gGlobals.cinematic.BGM)->dat->sub,0xff,0x80,1,-1,0);
       u8 fVar1 = gGlobals.VolBGM * 255.0f;
       u8 fVar2 = gGlobals.VolSFX * 255.0f;
@@ -246,7 +247,18 @@ void Cinematic::LoadNextScene(void){
       DCM::Start(gGlobals.cinematic.BGIndex,gGlobals.cinematic.BGId,vol);
     }
     gGlobals.cinematic.Borg6 = loadBorg6(gGlobals.cinematic.borg6enums[gGlobals.cinematic.tally]);
+    if (!gGlobals.cinematic.Borg6 || !gGlobals.cinematic.Borg6->dat) {
+      fprintf(stderr, "[Cinematics] loadBorg6 failed for tally %d\n", gGlobals.cinematic.tally);
+      gGlobals.cinematic.sceneDat = NULL;
+      gGlobals.cinematic.tally++;
+      return;
+    }
     gGlobals.cinematic.sceneDat = BorgAnimLoadScene((gGlobals.cinematic.Borg6)->dat->borg5);
+    if (!gGlobals.cinematic.sceneDat) {
+      fprintf(stderr, "[Cinematics] BorgAnimLoadScene failed for tally %d\n", gGlobals.cinematic.tally);
+      gGlobals.cinematic.tally++;
+      return;
+    }
     Scene_SetBorg6(gGlobals.cinematic.sceneDat,gGlobals.cinematic.Borg6);
     Scene::SetFlag10(gGlobals.cinematic.sceneDat);
     Scene::UnsetFlag80(gGlobals.cinematic.sceneDat);
@@ -259,9 +271,13 @@ void Cinematic::LoadNextScene(void){
 
 u16 Cinematic::LoadMap(void){
   Borg9Header *map = loadBorg9(BORG9_Overworld_I08); //load map chunk player starts at
+  if (!map) {
+    fprintf(stderr, "[Cinematics] LoadMap: loadBorg9 failed\n");
+    return GameStateA_1;
+  }
   u32 c = (u32)(map->dat).voxelObjCount;
   dialoug_dat *dia = NULL;
-  
+
   if (c) {
     for(s16 i=0;i<c;i++){//find and load voxel for opening dialog
     if((map->dat.voxelObjs[i].header.type==VOXEL_Dialouge)&&
@@ -269,6 +285,11 @@ u16 Cinematic::LoadMap(void){
         dia = &map->dat.voxelObjs[i].dialoug;
       }
     }
+  }
+  if (!dia) {
+    fprintf(stderr, "[Cinematics] LoadMap: opening dialog voxel not found\n");
+    remove_borg_9(map);
+    return GameStateA_1;
   }
   dialoug_func((u32)dia->borg_13,dia->RefPointID,dia->MapDatA,dia->MapShortA,dia->MapShortB,0x7fff);
   remove_borg_9(map);
@@ -280,6 +301,7 @@ u16 Cinematic::LoadCredits(void){
   return GameStateA_Credits;}
 
 u16 Cinematic::TrueName(void){
+  if (!PARTY || !gEntityDB) return GameStateA_1;
   CharSheet *alaron = PARTY->GetMemberById(gEntityDB->entities[EntInd_Alaron].ID);
   if (alaron) alaron->EXP->flags |= CHAR_TrueName;
   return GameStateA_1;

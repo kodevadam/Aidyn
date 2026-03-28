@@ -1149,11 +1149,20 @@ void passto_borg_6_free(Borg6Header *param_1){borg_6_free(param_1);}
 Borg7Header * loadBorg7(u32 index,ParticleHeadStruct *param_2){
   setBorgFlag();
   Borg7Header *ret = (Borg7Header *)getBorgItem(index);
-  if ((ret->dat).subCount){
-    ret->sceneDat = BorgAnimLoadScene(ret->unk18->b6->dat->borg5);
+  if (!ret) {
+    fprintf(stderr, "[anim] loadBorg7: getBorgItem(%u) returned NULL\n", index);
+    return NULL;
   }
-  ret->sceneDat->particleHead = param_2;
-  Borg7_StartParticles(ret);
+  if ((ret->dat).subCount){
+    if (ret->unk18 && ret->unk18->b6 && ret->unk18->b6->dat)
+      ret->sceneDat = BorgAnimLoadScene(ret->unk18->b6->dat->borg5);
+    else
+      ret->sceneDat = NULL;
+  }
+  if (ret->sceneDat) {
+    ret->sceneDat->particleHead = param_2;
+    Borg7_StartParticles(ret);
+  }
   return ret;
 }
 

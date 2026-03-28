@@ -940,6 +940,7 @@ LAB_80017c98:
                   if ((node->borg5) && (pDat->borg7P)) {
                     if (!node->sceneDat) {
                       node->sceneDat = BorgAnimLoadScene(node->borg5);
+                      if (!node->sceneDat) continue;
                       Scene::SetFlag40(node->sceneDat);
                       Scene::SetFlag4(node->sceneDat);
                       Scene::SetFogFlag(node->sceneDat);
@@ -1084,22 +1085,26 @@ void Actor::ChangeAppearance(playerData *pDat,u32 newBorg7){
       FREEQB7(pDat->borg7P);
     if ((pDat->SceneDat == NULL) && (pDat->isAlaron)) {
       pDat->SceneDat = BorgAnimLoadScene(some_borg5);
-      Scene::SetFlag40(pDat->SceneDat);
-      Scene::SetFlag4(pDat->SceneDat);
-      Scene::SetFogFlag(pDat->SceneDat);
-      Scene::SetModelTint(pDat->SceneDat,COLOR_WHITE);
-      Scene::SetLightData(pDat->SceneDat);
-      Scene::SceneSetMaxDynamicDirLights(pDat->SceneDat,4);
+      if (pDat->SceneDat) {
+        Scene::SetFlag40(pDat->SceneDat);
+        Scene::SetFlag4(pDat->SceneDat);
+        Scene::SetFogFlag(pDat->SceneDat);
+        Scene::SetModelTint(pDat->SceneDat,COLOR_WHITE);
+        Scene::SetLightData(pDat->SceneDat);
+        Scene::SceneSetMaxDynamicDirLights(pDat->SceneDat,4);
+      }
     }
     pDat->borg7P = loadBorg7(newBorg7,&gGlobals.gameVars.particleHead);
     pDat->borg7 = newBorg7;
-    Scene::SetParticleHead(pDat->borg7P->sceneDat,&gGlobals.gameVars.particleHead);
-    Scene::SetFlag40(pDat->borg7P->sceneDat);
-    Scene::SetFlag4(pDat->borg7P->sceneDat);
-    Scene::SetFogFlag(pDat->borg7P->sceneDat);
-    Scene::SetModelTint(pDat->borg7P->sceneDat,COLOR_WHITE);
-    Scene::SetLightData(pDat->borg7P->sceneDat);
-    Scene::SceneSetMaxDynamicDirLights(pDat->borg7P->sceneDat,4);
+    if (pDat->borg7P && pDat->borg7P->sceneDat) {
+      Scene::SetParticleHead(pDat->borg7P->sceneDat,&gGlobals.gameVars.particleHead);
+      Scene::SetFlag40(pDat->borg7P->sceneDat);
+      Scene::SetFlag4(pDat->borg7P->sceneDat);
+      Scene::SetFogFlag(pDat->borg7P->sceneDat);
+      Scene::SetModelTint(pDat->borg7P->sceneDat,COLOR_WHITE);
+      Scene::SetLightData(pDat->borg7P->sceneDat);
+      Scene::SceneSetMaxDynamicDirLights(pDat->borg7P->sceneDat,4);
+    }
   }
 }
 
