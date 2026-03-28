@@ -374,7 +374,10 @@ void Ofunc_borg0_free(void**param_1){
 
 void * Ofunc_getborg(s32 param_1){
   clearBorgFlag();
-  return **(void ***)((s32)getBorgItem(param_1) + 8);}
+  borgHeader *item = getBorgItem(param_1);
+  if (!item) return nullptr;
+  return **(void ***)((uintptr_t)item + 8);
+}
 
 //"borg1" is textures.
 

@@ -1082,8 +1082,9 @@ SceneData * BorgAnimLoadScene(u32 borg_5){
   b5 = (Borg5Header *)getBorgItem(borg_5);
   ret->borg5 = b5;
   if (b5 == NULL) {
+    fprintf(stderr, "[borg] BorgAnimLoadScene(%u): getBorgItem returned NULL, skipping\n", borg_5);
     HFREE(ret,2779);
-    CRASH("BorgAnimLoadScene","GetBorgItem failed");
+    return NULL;
   }
   ret->sceneTicked = false;
   ret->flags = 0;
