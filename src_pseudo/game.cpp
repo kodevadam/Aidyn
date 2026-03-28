@@ -24,6 +24,13 @@ WidgetCredits* gCreditsWidget=NULL;
 void init_DBs(void) {
   N64Print::Init(&gGlobals.DebugQueue);
   init_sfx_struct(&gGlobals.SFXStruct);
+#ifdef __linux__
+  /* TODO: entitydb, armorDB, spelldb, weapondb ROM addresses are unknown.
+   * Skip DB initialization until they're found by ROM scanning.
+   * The game won't have entity/item/spell data but won't crash. */
+  fprintf(stderr, "[game] Skipping DB init on Linux (ROM addresses for entitydb/armorDB/spelldb unknown)\n");
+  return;
+#endif
   ALLOC(gSpellDBp,122);
   ALLOC(gWeaponsDB,123);
   ALLOC(gItemDBp,124);
