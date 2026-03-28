@@ -25,6 +25,13 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
     } \
   } while(0)
 
+  /* Diagnostic: dump first 16 bytes of compressed input */
+  {
+    fprintf(stderr, "[lzb] compressed first 16:");
+    for (u32 i = 0; i < 16 && i < CompSize; i++) fprintf(stderr, " %02x", compDat[i]);
+    fprintf(stderr, " (CompSize=%u maxOut=%u)\n", CompSize, maxOut);
+  }
+
   do {
     iter++;
     while( true ) {
@@ -38,7 +45,7 @@ LAB_800aa3e8:
       if (iVar9 >= (s32)maxOut) goto LZB_DONE;
       LZB_CHECK_IN("literal");
       pbVar1 = compDat + uVar6;
-      if (0) fprintf(stderr, "[lzb] iter=%u: literal byte=0x%02x in=%u out=%d uVar5=0x%x\n", iter, *pbVar1, uVar6, iVar9, uVar5);
+      if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: literal byte=0x%02x in=%u out=%d uVar5=0x%x\n", iter, *pbVar1, uVar6, iVar9, uVar5);
       uVar6++;
       iVar9++;
       *OutDat = *pbVar1;
@@ -46,7 +53,8 @@ LAB_800aa3e8:
     }
     LZB_CHECK_IN("control");
     pbVar1 = compDat + uVar6;
-    if (0) fprintf(stderr, "[lzb] iter=%u: new control byte=0x%02x in=%u uVar5_before=0x%x\n", iter, *pbVar1, uVar6, uVar5);
+    if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: load byte=0x%02x in=%u → uVar5=0x%x MSB=%u\n",
+            iter, *pbVar1, uVar6, (u32)*pbVar1 * 2 + 1, (u32)*pbVar1 * 2 >> 8);
     uVar5 = (u32)*pbVar1 * 2 + 1;
     uVar6++;
     if ((u32)*pbVar1 * 2 >> 8 != 0) goto LAB_800aa3e8;
