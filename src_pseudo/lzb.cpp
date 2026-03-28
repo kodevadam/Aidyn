@@ -38,7 +38,11 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
       uVar5 <<= 1;
       if ((uVar5 & 0xff) == 0) break;
       if ((uVar5 >> 8 & 1) == 0) {
-        if (0) fprintf(stderr, "[lzb] iter=%u: match flag (bit=0) uVar5=0x%x in=%u out=%d\n", iter, uVar5, uVar6, iVar9);
+        /* EXPERIMENT: force literal on first token if no output yet */
+        if (iVar9 == 0 && iter == 1) {
+          fprintf(stderr, "[lzb] BOOTSTRAP: forcing literal (bit=0 but out=0)\n");
+          goto LAB_800aa3e8;
+        }
         goto LAB_800aa428;
       }
 LAB_800aa3e8:
@@ -151,7 +155,7 @@ LAB_800aa478:
 LAB_800aa598:
       iVar7+=2;
     }
-    iVar7+= (uVar8 < 0xd01 ^ 1);
+    iVar7 += !(uVar8 < 0xd01);
     /* Validate back-reference distance */
     {
       u32 bytesWritten = (u32)(OutDat - OutDatStart);
@@ -309,7 +313,7 @@ LAB_800aa690:
         } while ((uVar4 >> 0x10 & 1) == 0);
         iVar7+= 2;
       }
-      iVar7+= (uVar8 < 0xd01 ^ 1);
+      iVar7 += !(uVar8 < 0xd01);
       pbVar2 = param_3 - uVar8;
       iVar10++;
       *param_3 = *pbVar2;
@@ -503,7 +507,7 @@ LAB_800aaa0c:
 LAB_800aab98:
         iVar13 = iVar13 + 2;
       }
-      iVar13 = iVar13 + (uVar14 < 0xd01 ^ 1);
+      iVar13 += !(uVar14 < 0xd01);
       pbVar8 = param_3 - uVar14;
       iVar16 = iVar16 + 1;
       *param_3 = *pbVar8;
