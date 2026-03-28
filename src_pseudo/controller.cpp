@@ -504,6 +504,37 @@ s32 Controller::SetJoystick(float H,float V,u8 port){
 u8 Controller::GetInput(controller_aidyn** input,u8 port){
   controllerBuffer *buffer;
 
+#ifdef __linux__
+  /* On Linux, try non-blocking acquire of the controller mutex.
+   * If the controller thread holds it, skip the real buffer and
+   * use synthetic input instead of deadlocking. */
+  if (osSendMesg(&gContManager.contMesgQ, NULL, OS_MESG_NOBLOCK) != 0) {
+    /* Mutex busy — inject synthetic if available */
+    if (sLinuxSyntheticPending[port]) {
+      memset(&sLinuxEmptyInput, 0, sizeof(sLinuxEmptyInput));
+      *input = &sLinuxEmptyInput;
+      sLinuxSyntheticPending[port] = 0;
+      return 1;
+    }
+    return 0;
+  }
+  buffer = &gContManager.BufferPointer[port];
+  if (buffer->ContGet) {
+    *input = &buffer->inputlog[buffer->latest].contAidyn;
+    buffer->ContGet--;
+    buffer->latest++;
+    buffer->latest &= 0x7f;
+    sLinuxSyntheticPending[port] = 0;
+  } else if (sLinuxSyntheticPending[port]) {
+    memset(&sLinuxEmptyInput, 0, sizeof(sLinuxEmptyInput));
+    *input = &sLinuxEmptyInput;
+    sLinuxSyntheticPending[port] = 0;
+    osRecvMesg(&gContManager.contMesgQ, NULL, 1);
+    return 1;
+  }
+  osRecvMesg(&gContManager.contMesgQ, NULL, 1);
+  return (buffer->ContGet);
+#else
   osSendMesg(&gContManager.contMesgQ,NULL,1);
   buffer = &gContManager.BufferPointer[port];
   if (buffer->ContGet) {
@@ -511,24 +542,10 @@ u8 Controller::GetInput(controller_aidyn** input,u8 port){
     buffer->ContGet--;
     buffer->latest++;
     buffer->latest&=0x7f;
-#ifdef __linux__
-    sLinuxSyntheticPending[port] = 0;
-#endif
   }
-#ifdef __linux__
-  else if (sLinuxSyntheticPending[port]) {
-    /* No real input buffered. Inject one synthetic empty input so
-     * while(GetInput) loops (used as frame-tick counters) run at least
-     * once per game frame. Return 1 to enter, next call returns 0. */
-    memset(&sLinuxEmptyInput, 0, sizeof(sLinuxEmptyInput));
-    *input = &sLinuxEmptyInput;
-    sLinuxSyntheticPending[port] = 0;
-    osRecvMesg(&gContManager.contMesgQ,NULL,1);
-    return 1;
-  }
-#endif
   osRecvMesg(&gContManager.contMesgQ,NULL,1);
   return (buffer->ContGet);
+#endif
 }
 
 //decrpyt string from PFS back to ASCII

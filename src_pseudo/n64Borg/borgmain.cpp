@@ -274,7 +274,15 @@ borgHeader * getBorgItem(s32 index){
           fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
           HFREE(borgfile,603); HFREE(ret,604); return NULL;
         }
+#ifdef __linux__
+        /* On Linux, skip N64 pointer fixup (func_a) — the blob data uses
+         * 32-bit N64 pointer layout which is incompatible with 64-bit.
+         * borg1 has its own borg1_parse_n64 path; others are stubbed. */
+        if (listing.Type == 1) /* borg1 has Linux-specific parsing */
+          (*borg_funcs_a[listing.Type])(borgfile);
+#else
         (*borg_funcs_a[listing.Type])(borgfile);
+#endif
         gBorgpointers[index] = NULL;
         gBorgBytes[index] = 0;
         ret->index = -1;
@@ -306,6 +314,9 @@ borgHeader * getBorgItem(s32 index){
           return NULL;
         }
         fprintf(stderr, "[borg] index %d Type=%d: calling borg_funcs_a/b\n", index, listing.Type);
+#ifdef __linux__
+        if (listing.Type == 1)
+#endif
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
         gBorgpointers[index] = NULL;
@@ -547,10 +558,15 @@ void borg1_free(Borg1Header *param_1){
 "vertices and display lists; for whatever stupid reason they only used tri1 cmds"
 -Zoinkity*/
 void borg2_func_a(Borg2Data *param_1){
+#ifdef __linux__
+  /* Borg2 pointer fixup uses N64 32-bit struct layout. Skip on Linux. */
+  fprintf(stderr, "[borg2] borg2_func_a: skipping pointer fixup on Linux\n");
+  return;
+#else
   int *piVar1;
   int *piVar3;
   int iVar4;
-  
+
 
   SetPointer(param_1,dsplists);
   SetPointer(param_1,vertlist);
@@ -577,6 +593,7 @@ void borg2_func_a(Borg2Data *param_1){
       piVar3 = piVar3 + 2;
     }
   }
+#endif
 }
 
 u8 borg2_func_b(Borg2Header *param_1,Borg2Data *param_2){
