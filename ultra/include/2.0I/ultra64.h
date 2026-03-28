@@ -1108,7 +1108,13 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_IM_SIZ_32b_LOAD_BLOCK G_IM_SIZ_32b
 
 /* SetOtherMode_H shift/size constants */
-#define G_MDSFT_TEXTLUT  14
+#define G_MDSFT_TEXTLUT   14
+#define G_MDSFT_TEXTFILT  12
+#define G_MDSFT_TEXTDETAIL 17
+#define G_MDSFT_TEXTLOD   12
+#define G_MDSFT_TEXTPERSP 19
+#define G_MDSFT_CYCLETYPE 20
+#define G_MDSFT_PIPELINE  23
 #define G_MDSIZ_TEXTLUT   2
 /* G_SETOTHERMODE_H defined in GBI section above */
 
@@ -1185,6 +1191,10 @@ s32     osPiStartDma(OSIoMesg *mb, s32 pri, s32 dir, u32 devAddr, void *vAddr, u
 void    osInvalDCache(void *vaddr, s32 nbytes);
 void    osWritebackDCache(void *vaddr, s32 nbytes);
 void    osWritebackDCacheAll(void);
+
+/* On N64, converts KSEG0/KSEG1 address to physical.  On Linux, identity. */
+static inline void *osVirtualToPhysical(void *addr) { return addr; }
+static inline void *osPhysicalToVirtual(void *addr) { return addr; }
 
 OSTime  osGetTime(void);
 u32     osGetMemSize(void);
