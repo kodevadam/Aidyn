@@ -3,6 +3,16 @@
 #include "romstring.h"
 
 u32 appState_ContPakCheck(Gfx **GG) {
+#ifdef __linux__
+  /* Skip contPak check — no N64 memory pak on Linux.
+   * Proceed directly to next state (title screen). */
+  fprintf(stderr, "[contpak] Skipping contPak check on Linux\n");
+  Gfx *g = Graphics::StartDisplay(*GG,FULL_SCREENSPACE);
+  g = Graphics::SomeOtherInit(g,FULL_SCREENSPACE,0,0,0,0);
+  RSPFUNC6(g);
+  *GG = g;
+  return 0;  /* return to appstate 0 = title/splash */
+#endif
   Gfx *g = Graphics::StartDisplay(*GG,FULL_SCREENSPACE);
   g = Graphics::SomeOtherInit(g,FULL_SCREENSPACE,0,0,0,0);
    ContPakFunc controller_error_func[]={
