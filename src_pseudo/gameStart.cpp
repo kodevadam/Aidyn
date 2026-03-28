@@ -31,7 +31,13 @@ void flycam_func(void){
   gGlobals.screenFadeMode = ScreenFade_In;
   gGlobals.screenFadeSpeed = (2.0/30);
   gFlycamBorg6P = loadBorg6(gFlycamSequences[flycam_counter].borg6);
+  if (!gFlycamBorg6P || !gFlycamBorg6P->dat) {
+    fprintf(stderr, "[gameStart] flycam borg6 failed to load, skipping scene setup\n");
+    gFlycamSceneP = NULL;
+    return;
+  }
   gFlycamSceneP = BorgAnimLoadScene(gFlycamBorg6P->dat->borg5);
+  if (!gFlycamSceneP) return;
   Scene_SetBorg6(gFlycamSceneP,gFlycamBorg6P);
   Scene::SetFlag10(gFlycamSceneP);
 }
