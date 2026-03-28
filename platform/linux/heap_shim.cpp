@@ -252,6 +252,12 @@ void HeapInit(void *start, size_t size) {
 void *HeapAlloc(size_t size, char *file, u32 line) {
     (void)file; (void)line;
     if (size == 0) size = 1;
+    /* Reject obviously corrupt allocation sizes (> 32 MB) */
+    if (size > 32 * 1024 * 1024) {
+        fprintf(stderr, "[heap] HeapAlloc(%zu) rejected – likely corrupt size (file=%s line=%u)\n",
+                size, file ? file : "?", line);
+        return nullptr;
+    }
     /* Allocate from the low-address pool instead of system malloc */
     HeapBlock *hb = (HeapBlock *)pool_alloc(HB_SZ + size);
     if (!hb) {
