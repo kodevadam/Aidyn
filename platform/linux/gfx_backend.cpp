@@ -231,63 +231,46 @@ bool PollEvents() {
 }
 
 /* =========================================================================
+ * RSP/RDP state — tracks N64 graphics state for OpenGL translation
+ * ========================================================================= */
+static struct {
+    /* Fill / prim / env / fog colors (packed RGBA8888) */
+    u32 fillColor;
+    u32 fogColor;
+    u32 blendColor;
+    u32 primColor;
+    u32 envColor;
+
+    /* Scissor (in screen pixels, not N64 fixed-point) */
+    int scissorX, scissorY, scissorW, scissorH;
+
+    /* Geometry mode flags */
+    u32 geometryMode;
+
+    /* Cycle type (G_CYC_*) */
+    u32 cycleType;
+
+    /* N64 vertex buffer: RSP can hold 32 vertices for F3DEX2 */
+    struct Vertex {
+        float x, y, z, w;       /* position (after model-view transform on N64) */
+        float u, v;             /* texture coords */
+        u8 r, g, b, a;         /* vertex color */
+    } vtxBuf[64];
+
+    /* Matrix stack (simplified: just model-view and projection) */
+    float modelview[4][4];
+    float projection[4][4];
+    float mvpStack[16][4][4];
+    int mvpDepth;
+} sRSP;
+
+/* =========================================================================
  * Display list processing
  *
- * GBI command opcodes (upper byte of Gfx.w.hi).  Only the opcodes actually
- * used by F3DEX2 are listed.  The full set is ~50 commands.
+ * F3DEX2 opcode constants are defined in ultra64.h (G_VTX, G_DL, etc.).
+ * The walker reads the opcode from the top byte of each Gfx word and
+ * dispatches to the appropriate handler.
  * ========================================================================= */
-/* GBI opcode enum – use GBI_ prefix to avoid collisions with ultra64.h macros */
-/* F3DEX2 opcodes – corrected from the N64 SDK gbi.h */
-enum GbiCmd : u8 {
-    GBI_SPNOOP        = 0x00,
-    GBI_VTX           = 0x01,
-    GBI_MODIFYVTX     = 0x02,
-    GBI_CULLDL        = 0x03,
-    GBI_BRANCH_Z      = 0x04,
-    GBI_TRI1          = 0x05,
-    GBI_TRI2          = 0x06,
-    GBI_QUAD          = 0x07,
-    GBI_DL            = 0xDE,
-    GBI_ENDDL         = 0xDF,
-    GBI_MTX           = 0xDA,
-    GBI_MOVEWORD      = 0xDB,
-    GBI_MOVEMEM       = 0xDC,
-    GBI_TEXTURE       = 0xD7,
-    GBI_POPMTX        = 0xD8,
-    GBI_GEOMETRYMODE  = 0xD9,
-    GBI_RDPPIPESYNC   = 0xE7,
-    GBI_RDPFULLSYNC   = 0xE9,
-    GBI_SETSCISSOR    = 0xED,
-    GBI_SETOTHERMODE_L= 0xE2,
-    GBI_SETOTHERMODE_H= 0xE3,
-    GBI_TEXRECT       = 0xE4,
-    GBI_TEXRECTFLIP   = 0xE5,
-    GBI_RDPLOADSYNC   = 0xE6,
-    GBI_RDPTILESYNC   = 0xE8,
-    GBI_LOADBLOCK     = 0xF3,
-    GBI_LOADTLUT      = 0xF0,
-    GBI_SETTILESIZE   = 0xF2,
-    GBI_LOADTILE      = 0xF4,
-    GBI_SETTILE       = 0xF5,
-    GBI_FILLRECT      = 0xF6,
-    GBI_SETFILLCOLOR  = 0xF7,
-    GBI_SETFOGCOLOR   = 0xF8,
-    GBI_SETBLENDCOLOR = 0xF9,
-    GBI_SETPRIMCOLOR  = 0xFA,
-    GBI_SETENVCOLOR   = 0xFB,
-    GBI_SETCOMBINE    = 0xFC,
-    GBI_SETTIMG       = 0xFD,
-    GBI_SETZIMG       = 0xFE,
-    GBI_SETCIMG       = 0xFF,
-};
-
-/*
- * SubmitFrame – translate a display list to OpenGL calls.
- *
- * This is currently a "log and skip" skeleton.  Each command is detected and
- * ignored with a comment indicating where real GL code should go.  Fill these
- * in incrementally as the port matures.
- */
 static unsigned sDLStats[256] = {};
 static unsigned sDLFrameCount = 0;
 
@@ -295,142 +278,282 @@ static bool ptr_in_pool(uintptr_t addr) {
     return addr >= 0x40000000 && addr < 0x50000000;
 }
 
+/* Unpack RGBA8888 colour word to floats */
+static void unpack_rgba(u32 c, float *r, float *g, float *b, float *a) {
+    *r = ((c >> 24) & 0xFF) / 255.0f;
+    *g = ((c >> 16) & 0xFF) / 255.0f;
+    *b = ((c >>  8) & 0xFF) / 255.0f;
+    *a = ((c >>  0) & 0xFF) / 255.0f;
+}
+
+/* Draw a filled 2D rectangle using immediate-mode GL (no shaders needed) */
+static void gl_fill_rect(int x0, int y0, int x1, int y1, u32 color) {
+    float r, g, b, a;
+    unpack_rgba(color, &r, &g, &b, &a);
+
+    /* Map N64 screen coords (320×240) to GL NDC (-1..1) */
+    float nx0 = (x0 / 320.0f) * 2.0f - 1.0f;
+    float ny0 = 1.0f - (y0 / 240.0f) * 2.0f;
+    float nx1 = (x1 / 320.0f) * 2.0f - 1.0f;
+    float ny1 = 1.0f - (y1 / 240.0f) * 2.0f;
+
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor4f(r, g, b, a);
+    glBegin(GL_QUADS);
+    glVertex2f(nx0, ny0);
+    glVertex2f(nx1, ny0);
+    glVertex2f(nx1, ny1);
+    glVertex2f(nx0, ny1);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+}
+
+/* Load N64 vertex data into the RSP vertex buffer */
+static void load_vertices(uintptr_t addr, int numVerts, int startIdx) {
+    if (!ptr_in_pool(addr)) return;
+    if (startIdx + numVerts > 64) numVerts = 64 - startIdx;
+
+    /* N64 Vtx format: 16 bytes per vertex
+     * s16 x, y, z; u16 flag; s16 u, v; u8 r, g, b, a (or nx, ny, nz, a) */
+    const u8 *src = reinterpret_cast<const u8 *>(addr);
+    for (int i = 0; i < numVerts; i++) {
+        auto &v = sRSP.vtxBuf[startIdx + i];
+        /* N64 is big-endian; data was byte-swapped on load */
+        const u8 *p = src + i * 16;
+        s16 px = (s16)((p[0] << 8) | p[1]);
+        s16 py = (s16)((p[2] << 8) | p[3]);
+        s16 pz = (s16)((p[4] << 8) | p[5]);
+        /* p[6..7] = flag */
+        s16 pu = (s16)((p[8] << 8) | p[9]);
+        s16 pv = (s16)((p[10] << 8) | p[11]);
+        v.x = (float)px;
+        v.y = (float)py;
+        v.z = (float)pz;
+        v.w = 1.0f;
+        v.u = (float)pu / 32.0f;   /* 5.10 fixed point */
+        v.v = (float)pv / 32.0f;
+        v.r = p[12];
+        v.g = p[13];
+        v.b = p[14];
+        v.a = p[15];
+    }
+}
+
+/* Draw a triangle from the vertex buffer (vertex-colored, no textures) */
+static void draw_tri(int v0, int v1, int v2) {
+    auto &a = sRSP.vtxBuf[v0];
+    auto &b = sRSP.vtxBuf[v1];
+    auto &c = sRSP.vtxBuf[v2];
+
+    /* Simple orthographic projection for now: scale x/y to NDC */
+    auto emit = [](const decltype(sRSP.vtxBuf[0]) &vtx) {
+        glColor4ub(vtx.r, vtx.g, vtx.b, vtx.a);
+        /* Scale vertex positions: N64 screen coords are roughly -320..320, -240..240 */
+        glVertex3f(vtx.x / 320.0f, vtx.y / 240.0f, vtx.z / 65536.0f);
+    };
+
+    glBegin(GL_TRIANGLES);
+    emit(a); emit(b); emit(c);
+    glEnd();
+}
+
 static void process_display_list(const Gfx *dl, int depth = 0) {
-    if (!dl || depth > 16) return; /* guard against infinite recursion */
+    if (!dl || depth > 16) return;
     if (!ptr_in_pool((uintptr_t)dl)) {
         fprintf(stderr, "[gfx] DL ptr %p outside pool, skipping\n", (void*)dl);
         return;
     }
 
-    int maxCmds = 10000; /* safety limit */
+    int maxCmds = 10000;
     for (; maxCmds > 0; maxCmds--) {
         u8 cmd = (u8)(dl->w.hi >> 24);
         sDLStats[cmd]++;
 
-        switch ((GbiCmd)cmd) {
-        case GBI_SPNOOP:
-        case GBI_RDPPIPESYNC:
-        case GBI_RDPFULLSYNC:
-        case GBI_RDPLOADSYNC:
-        case GBI_RDPTILESYNC:
-            /* sync / noop – nothing to do */
+        switch (cmd) {
+        case G_SPNOOP:
+        case G_RDPPIPESYNC:
+        case G_RDPFULLSYNC:
+        case G_RDPLOADSYNC:
+        case G_RDPTILESYNC:
             break;
 
-        case GBI_ENDDL:
-            return; /* end of display list */
+        case G_ENDDL:
+            return;
 
-        case GBI_DL: {
-            /* Call sub-display list.  Address is in w.lo. */
+        case G_DL: {
             uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
             if (ptr_in_pool(addr)) {
                 const Gfx *subdl = reinterpret_cast<const Gfx *>(addr);
-                bool branch = (dl->w.hi & 0xFF0000) >> 16;
+                bool branch = (dl->w.hi >> 16) & 0x01;
                 process_display_list(subdl, depth + 1);
                 if (branch) return;
             }
             break;
         }
 
-        case GBI_MTX:
-            /* TODO: push/load/multiply matrix onto GL matrix stack */
+        case G_MTX:
+            /* Store matrix pointer for future use; full transform chain TBD */
             break;
 
-        case GBI_POPMTX:
-            /* TODO: pop matrix stack */
+        case G_POPMTX:
             break;
 
-        case GBI_GEOMETRYMODE:
-            /* TODO: map N64 geometry mode flags to glEnable/glDisable */
-            break;
-
-        case GBI_VTX:
-            /* TODO: upload vertex data to a vertex buffer */
-            break;
-
-        case GBI_TRI1:
-        case GBI_TRI2:
-        case GBI_QUAD:
-            /* TODO: draw triangles from the loaded vertex buffer */
-            break;
-
-        case GBI_TEXTURE:
-            /* TODO: set texture scale / enable */
-            break;
-
-        case GBI_SETTIMG:
-            /* TODO: set the source texture image pointer */
-            break;
-
-        case GBI_SETTILE:
-            /* TODO: configure tile descriptor */
-            break;
-
-        case GBI_LOADBLOCK:
-        case GBI_LOADTILE:
-            /* TODO: upload texture data to GL */
-            break;
-
-        case GBI_SETTILESIZE:
-            /* TODO: set tile UV extents */
-            break;
-
-        case GBI_LOADTLUT:
-            /* TODO: load colour palette */
-            break;
-
-        case GBI_SETCOMBINE:
-            /* TODO: translate N64 combiner to GLSL shader */
-            break;
-
-        case GBI_SETOTHERMODE_L:
-        case GBI_SETOTHERMODE_H:
-            /* TODO: map render / blend modes */
-            break;
-
-        case GBI_SETSCISSOR:
-            /* TODO: glScissor */
-            break;
-
-        case GBI_FILLRECT: {
-            /* Draw a filled rectangle – used for clears / UI boxes.
-             * Extract coords from the command word:
-             *   hi[23:12] = XH, hi[11:0] = YH  (right/bottom, 2-frac bits)
-             *   lo[23:12] = XL, lo[11:0] = YL  (left/top)
-             */
-            /* TODO: implement with a fullscreen-quad shader */
+        case G_GEOMETRYMODE: {
+            u32 clearBits = dl->w.hi & 0x00FFFFFF;
+            u32 setBits   = dl->w.lo;
+            sRSP.geometryMode = (sRSP.geometryMode & clearBits) | setBits;
             break;
         }
 
-        case GBI_SETFILLCOLOR:
-            /* TODO: store fill colour for subsequent G_FILLRECT */
+        case G_VTX: {
+            int numVerts = (dl->w.hi >> 12) & 0xFF;
+            int startIdx = ((dl->w.hi >> 1) & 0x7F) - numVerts;
+            if (startIdx < 0) startIdx = 0;
+            uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
+            load_vertices(addr, numVerts, startIdx);
+            break;
+        }
+
+        case G_TRI1: {
+            int v0 = ((dl->w.hi >> 16) & 0xFF) / 2;
+            int v1 = ((dl->w.hi >>  8) & 0xFF) / 2;
+            int v2 = ((dl->w.hi >>  0) & 0xFF) / 2;
+            draw_tri(v0, v1, v2);
+            break;
+        }
+
+        case G_TRI2: {
+            int v0 = ((dl->w.hi >> 16) & 0xFF) / 2;
+            int v1 = ((dl->w.hi >>  8) & 0xFF) / 2;
+            int v2 = ((dl->w.hi >>  0) & 0xFF) / 2;
+            int v3 = ((dl->w.lo >> 16) & 0xFF) / 2;
+            int v4 = ((dl->w.lo >>  8) & 0xFF) / 2;
+            int v5 = ((dl->w.lo >>  0) & 0xFF) / 2;
+            draw_tri(v0, v1, v2);
+            draw_tri(v3, v4, v5);
+            break;
+        }
+
+        case G_QUAD: {
+            int v0 = ((dl->w.hi >> 16) & 0xFF) / 2;
+            int v1 = ((dl->w.hi >>  8) & 0xFF) / 2;
+            int v2 = ((dl->w.hi >>  0) & 0xFF) / 2;
+            draw_tri(v0, v1, v2);
+            break;
+        }
+
+        case G_TEXTURE_CMD:
+            /* Texture scale/enable — tracked for future texture support */
             break;
 
-        case GBI_SETFOGCOLOR:
-            /* TODO: glFog equivalent */
+        case G_SETTIMG:
+        case G_SETTILE:
+        case G_LOADBLOCK:
+        case G_LOADTILE:
+        case G_SETTILESIZE:
+        case G_LOADTLUT:
+            /* Texture commands — stub until texture rendering implemented */
             break;
 
-        case GBI_SETBLENDCOLOR:
-        case GBI_SETENVCOLOR:
-        case GBI_SETPRIMCOLOR:
-            /* TODO: pass colour to shader uniforms */
+        case G_SETCOMBINE:
+            /* Combiner mode — stub until shader-based rendering */
             break;
 
-        case GBI_TEXRECT:
-        case GBI_TEXRECTFLIP:
-            /* TODO: textured rectangle (2D sprite blit) */
+        case G_SETOTHERMODE_L:
+        case G_SETOTHERMODE_H: {
+            /* Track cycle type for fill rect handling */
+            u32 shift = (dl->w.hi >> 8) & 0xFF;
+            if (cmd == G_SETOTHERMODE_H && shift == 20) {
+                sRSP.cycleType = (dl->w.lo >> 20) & 0x03;
+            }
+            break;
+        }
+
+        case G_SETSCISSOR_CMD: {
+            int x0 = (dl->w.hi >> 12) & 0xFFF;
+            int y0 = (dl->w.hi >>  0) & 0xFFF;
+            int x1 = (dl->w.lo >> 12) & 0xFFF;
+            int y1 = (dl->w.lo >>  0) & 0xFFF;
+            /* Fixed-point 10.2 → integer pixels */
+            x0 >>= 2; y0 >>= 2; x1 >>= 2; y1 >>= 2;
+            sRSP.scissorX = x0;
+            sRSP.scissorY = y0;
+            sRSP.scissorW = x1 - x0;
+            sRSP.scissorH = y1 - y0;
+            /* Map to actual window coords */
+            float sx = (float)sWidth / 320.0f;
+            float sy = (float)sHeight / 240.0f;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor((int)(x0 * sx), (int)((240 - y1) * sy),
+                      (int)((x1 - x0) * sx), (int)((y1 - y0) * sy));
+            break;
+        }
+
+        case G_FILLRECT: {
+            /* Extract coords: hi has xh/yh (right/bottom), lo has xl/yl (left/top) */
+            int xh = (dl->w.hi >> 14) & 0x3FF;
+            int yh = (dl->w.hi >>  2) & 0x3FF;
+            int xl = (dl->w.lo >> 14) & 0x3FF;
+            int yl = (dl->w.lo >>  2) & 0x3FF;
+            /* In fill mode, the fill color is used directly */
+            gl_fill_rect(xl, yl, xh + 1, yh + 1, sRSP.fillColor);
+            break;
+        }
+
+        case G_SETFILLCOLOR:
+            sRSP.fillColor = dl->w.lo;
             break;
 
-        case GBI_CULLDL:
-            /* TODO: frustum cull check */
+        case G_SETFOGCOLOR:
+            sRSP.fogColor = dl->w.lo;
             break;
 
-        case GBI_MOVEMEM:
-        case GBI_MOVEWORD:
-            /* TODO: move data into RSP DMEM – map to appropriate state */
+        case G_SETBLENDCOLOR:
+            sRSP.blendColor = dl->w.lo;
+            break;
+
+        case G_SETPRIMCOLOR:
+            sRSP.primColor = dl->w.lo;
+            break;
+
+        case G_SETENVCOLOR:
+            sRSP.envColor = dl->w.lo;
+            break;
+
+        case G_TEXRECT:
+        case G_TEXRECTFLIP:
+            /* Textured rectangle — stub */
+            break;
+
+        case G_CULLDL:
+        case G_BRANCH_Z:
+            break;
+
+        case G_MOVEMEM:
+        case G_MOVEWORD:
+            break;
+
+        case G_SETCIMG:
+        case G_SETZIMG:
+            break;
+
+        case G_SETPRIMDEPTH:
+        case G_MODIFYVTX:
             break;
 
         default:
-            /* Unknown command – ignore */
             break;
         }
 
@@ -467,21 +590,33 @@ void SubmitFrame(OSScTask *task) {
     if (!task) return;
 
     if (sSoftware) {
-        /* Software mode: just clear and present for now */
         SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
         SDL_RenderClear(sRenderer);
         SDL_RenderPresent(sRenderer);
     } else {
+        /* Reset RSP state for this frame */
+        sRSP.fillColor = 0;
+        sRSP.fogColor = 0;
+        sRSP.blendColor = 0;
+        sRSP.primColor = 0;
+        sRSP.envColor = 0;
+        sRSP.geometryMode = 0;
+        sRSP.cycleType = 0;
+        sRSP.scissorX = 0;
+        sRSP.scissorY = 0;
+        sRSP.scissorW = sWidth;
+        sRSP.scissorH = sHeight;
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
 
         /* Walk the display list attached to the task */
         if (task->list.t.data_ptr) {
             Gfx *dlStart = (Gfx*)task->list.t.data_ptr;
-            /* data_size has 32-bit truncation issues; use maxCmds safety limit instead */
-            fprintf(stderr, "[gfx] SubmitFrame: walking DL at %p\n", (void*)dlStart);
             process_display_list(dlStart);
-            fprintf(stderr, "[gfx] SubmitFrame: DL walk complete\n");
         }
+
+        glDisable(GL_SCISSOR_TEST);
 
         sDLFrameCount++;
         if (sDLFrameCount <= 3 || (sDLFrameCount % 300 == 0)) {
@@ -491,10 +626,8 @@ void SubmitFrame(OSScTask *task) {
                     fprintf(stderr, " %02x:%u", i, sDLStats[i]);
             }
             fprintf(stderr, "\n");
-            memset(sDLStats, 0, sizeof(sDLStats));
-        } else {
-            memset(sDLStats, 0, sizeof(sDLStats));
         }
+        memset(sDLStats, 0, sizeof(sDLStats));
 
         SDL_GL_SwapWindow(sWindow);
     }

@@ -86,25 +86,19 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
                 c[16],c[17],c[18],c[19],c[20],c[21],c[22],c[23],
                 c[24],c[25],c[26],c[27],c[28],c[29],c[30],c[31]);
       }
-      decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
-      {
-        u8 *out = tmpBuf + LZB_PREFIX;
-        if (0) fprintf(stderr, "[lzb] decompressed first 32 bytes: "
-                "%02x %02x %02x %02x %02x %02x %02x %02x "
-                "%02x %02x %02x %02x %02x %02x %02x %02x "
-                "%02x %02x %02x %02x %02x %02x %02x %02x "
-                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
-                out[0],out[1],out[2],out[3],out[4],out[5],out[6],out[7],
-                out[8],out[9],out[10],out[11],out[12],out[13],out[14],out[15],
-                out[16],out[17],out[18],out[19],out[20],out[21],out[22],out[23],
-                out[24],out[25],out[26],out[27],out[28],out[29],out[30],out[31]);
+      s32 lzbRet = decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      if (lzbRet < 0) {
+        fprintf(stderr, "[borg] LZB decompression FAILED (ret=%d), zeroing output\n", lzbRet);
+        memset(borgfile, 0, outSize);
+        free(tmpBuf);
+        HFREE(compressedDat,421);
+        return false;
       }
       memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
       free(tmpBuf);
       HFREE(compressedDat,421);
     }
   }
-  /* fprintf(stderr, "[borg] decompressBorg done\n"); */
   return true;
 }
 
@@ -172,8 +166,11 @@ borgHeader * getBorgItem(s32 index){
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),561);
         if (gBorgBytes[index] == 0) {
           ALLOCS(borgfile,listing.uncompressed,566);
-          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
-                         borgfile,listing.uncompressed,(s32)listing.Compression);
+          if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+                         borgfile,listing.uncompressed,(s32)listing.Compression)) {
+            fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+            HFREE(borgfile,567); HFREE(ret,568); return NULL;
+          }
           fprintf(stderr, "[borg] calling borg_funcs_a[%d] on borgfile=%p\n", listing.Type, borgfile);
           (*borg_funcs_a[listing.Type])(borgfile);
           gBorgpointers[index] = (borgHeader*)borgfile;
@@ -189,8 +186,11 @@ borgHeader * getBorgItem(s32 index){
       else {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),600);
         ALLOCS(borgfile,listing.uncompressed,602);
-        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
-                       listing.uncompressed,(s32)listing.Compression);
+        if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
+                       listing.uncompressed,(s32)listing.Compression)) {
+          fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+          HFREE(borgfile,603); HFREE(ret,604); return NULL;
+        }
         (*borg_funcs_a[listing.Type])(borgfile);
         gBorgpointers[index] = NULL;
         gBorgBytes[index] = 0;
@@ -204,9 +204,12 @@ borgHeader * getBorgItem(s32 index){
         size = gBorgHeaderSizes[type] + listing.uncompressed;
         ALLOCS(ret,size,627);
         bzero(ret,size);
-        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+        if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                        (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
-                       (s32)listing.Compression);
+                       (s32)listing.Compression)) {
+          fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+          HFREE(ret,628); return NULL;
+        }
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
         gBorgpointers[index] = NULL;
