@@ -57,18 +57,34 @@ void SetBorgListing(void *listing,void *files){
             raw[0],raw[1],raw[2],raw[3],raw[4],raw[5],raw[6],raw[7],
             raw[8],raw[9],raw[10],raw[11],raw[12],raw[13],raw[14],raw[15]);
   }
-  /* Also check: what if borg_files base is wrong? Try offset 0 (absolute ROM offset) */
+  /* Scan ROM for correct borg_files base address.
+   * Item 28 is Type=1, Compression=0 (uncompressed), so its raw ROM bytes
+   * must start with a valid Borg1Data header (type 0-8, non-zero W/H). */
   {
     BorgListing dl;
     ROMCOPYS(&dl, (void *)((uintptr_t)listing + 28 * sizeof(BorgListing) + 8), sizeof(BorgListing), 255);
     swapBorgListing(&dl);
-    /* Try reading from absolute ROM offset (Offset as file offset directly) */
-    u8 raw2[16] = {};
-    ROMCOPYS(raw2, (void *)((uintptr_t)0x10000000 + dl.Offset), 16, 256);
-    fprintf(stderr, "[borg-scan] item 28 alt-base (0x10000000+Offset): "
-            "raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-            raw2[0],raw2[1],raw2[2],raw2[3],raw2[4],raw2[5],raw2[6],raw2[7],
-            raw2[8],raw2[9],raw2[10],raw2[11],raw2[12],raw2[13],raw2[14],raw2[15]);
+    u32 itemOffset = dl.Offset;  /* 0x68E940 */
+    fprintf(stderr, "[borg-scan] Scanning ROM for correct borg_files (item 28 Offset=0x%x)...\n", itemOffset);
+    int found = 0;
+    /* ROM is 32MB, scan every 16-byte aligned candidate */
+    for (u32 baseOff = 0; baseOff + itemOffset + 8 < 0x2000000; baseOff += 16) {
+      u8 hdr[8];
+      ROMCOPYS(hdr, (void *)((uintptr_t)0x10000000 + baseOff + itemOffset), 8, 257);
+      u16 type = ((u16)hdr[0] << 8) | hdr[1];
+      u8 width = hdr[4];
+      u8 height = hdr[5];
+      if (type <= 8 && width > 0 && width <= 128 && height > 0 && height <= 128) {
+        u16 flag = ((u16)hdr[2] << 8) | hdr[3];
+        fprintf(stderr, "[borg-scan] CANDIDATE: borg_files=0x%08x (fileOff=0x%06x) → "
+                "type=%u flag=0x%04x W=%u H=%u raw=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                0x10000000 + baseOff, baseOff, type, flag, width, height,
+                hdr[0],hdr[1],hdr[2],hdr[3],hdr[4],hdr[5],hdr[6],hdr[7]);
+        found++;
+        if (found >= 20) { fprintf(stderr, "[borg-scan] ... (stopped at 20 candidates)\n"); break; }
+      }
+    }
+    if (found == 0) fprintf(stderr, "[borg-scan] No valid borg_files candidates found!\n");
   }
 }
 
