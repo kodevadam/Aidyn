@@ -200,7 +200,6 @@ borgHeader * getBorgItem(s32 index){
   s32 memOld;
   borgHeader *ret;
   u8 *borgfile;
-  s32 type;
   u32 size;
   BorgListing listing;
   
@@ -265,7 +264,7 @@ borgHeader * getBorgItem(s32 index){
     }
     else {
       if (borgFlag){
-        size = gBorgHeaderSizes[type] + listing.uncompressed;
+        size = gBorgHeaderSizes[listing.Type] + listing.uncompressed;
         ALLOCS(ret,size,627);
         if (!ret) { fprintf(stderr, "[borg] alloc failed for index %d, skipping\n", index); return NULL; }
         bzero(ret,size);
@@ -297,7 +296,7 @@ borgHeader * getBorgItem(s32 index){
       }
       else {
         if (!gBorgBytes[index]) {
-          size = gBorgHeaderSizes[type] + listing.uncompressed;
+          size = gBorgHeaderSizes[listing.Type] + listing.uncompressed;
           ALLOCS(ret,size,653);
           if (!ret) { fprintf(stderr, "[borg] alloc failed for index %d, skipping\n", index); return NULL; }
           bzero(ret,size);
