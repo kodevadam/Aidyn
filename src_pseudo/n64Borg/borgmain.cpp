@@ -360,7 +360,12 @@ void * Ofunc_getborg(s32 param_1){
  * Host Borg1Data has 8-byte pointers so it can't overlay the raw data.
  * Parse the N64 binary, allocate a host-layout Borg1Data, and resolve
  * the 32-bit offsets into real pointers. */
-static Borg1Data *borg1_parse_n64(u8 *raw) {
+static Borg1Data *borg1_parse_n64(u8 *raw, u32 rawSize) {
+    if (rawSize < 24) {
+        fprintf(stderr, "[borg1_parse] blob too small (%u bytes, need 24)\n", rawSize);
+        return nullptr;
+    }
+
     fprintf(stderr, "[borg1_parse] raw first 24 bytes: "
             "%02x %02x %02x %02x %02x %02x %02x %02x "
             "%02x %02x %02x %02x %02x %02x %02x %02x "
@@ -401,9 +406,19 @@ static Borg1Data *borg1_parse_n64(u8 *raw) {
     off_pal   = be32(off_pal);
     d->unk14  = be32(unk14);
 
-    d->dList    = off_dList ? (Gfx *)(raw + off_dList) : nullptr;
-    d->bmp      = off_bmp   ? (u8  *)(raw + off_bmp)  : nullptr;
-    d->pallette = off_pal   ? (u16 *)(raw + off_pal)   : nullptr;
+    /* Bounds-check: offsets must be within the blob, not wild pointers */
+    d->dList    = (off_dList && off_dList < rawSize) ? (Gfx *)(raw + off_dList) : nullptr;
+    d->bmp      = (off_bmp   && off_bmp   < rawSize) ? (u8  *)(raw + off_bmp)  : nullptr;
+    d->pallette = (off_pal   && off_pal   < rawSize) ? (u16 *)(raw + off_pal)   : nullptr;
+
+    if (off_dList >= rawSize || off_bmp >= rawSize || off_pal >= rawSize) {
+        fprintf(stderr, "[borg1_parse] WARNING: offset(s) out of bounds (blobSize=%u): "
+                "dList=0x%x bmp=0x%x pal=0x%x\n", rawSize, off_dList, off_bmp, off_pal);
+    }
+
+    fprintf(stderr, "[borg1_parse] parsed: type=%u flag=0x%x W=%u H=%u "
+            "dList_off=0x%x bmp_off=0x%x pal_off=0x%x\n",
+            d->type, d->flag, d->Width, d->Height, off_dList, off_bmp, off_pal);
 
     return d;
 }
@@ -429,7 +444,21 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
 
 #ifdef __linux__
   /* Parse N64 binary layout into a properly-sized host struct */
-  Borg1Data *dat = borg1_parse_n64((u8 *)dat_raw);
+  /* dat_raw is the borgfile blob. We don't know the exact size here,
+   * but getBorgItem allocated listing.uncompressed bytes for it.
+   * Use a reasonable cap to prevent wild pointer creation. */
+  u32 blobSize = 0;
+  if (header->head.index >= 0) {
+    /* Look up the listing to get the real size */
+    BorgListing bl;
+    extern void *BorgListingPointer;
+    ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + header->head.index * sizeof(BorgListing) + 8),
+             sizeof(BorgListing), 440);
+    swapBorgListing(&bl);
+    blobSize = bl.uncompressed;
+  }
+  if (blobSize == 0) blobSize = 65536; /* fallback cap */
+  Borg1Data *dat = borg1_parse_n64((u8 *)dat_raw, blobSize);
   if (!dat) return false;
 #else
   Borg1Data *dat = dat_raw;
