@@ -42,6 +42,34 @@ void SetBorgListing(void *listing,void *files){
   CLEAR(borg_mem);
   CLEAR(borg_count);
   fprintf(stderr, "[borg] SetBorgListing done, borgTotal=%u\n", borgTotal);
+
+  /* Diagnostic: dump metadata and first 16 raw ROM bytes for items 26-31 */
+  for (int di = 26; di <= 31 && di < (int)borgTotal; di++) {
+    BorgListing dl;
+    ROMCOPYS(&dl, (void *)((uintptr_t)listing + di * sizeof(BorgListing) + 8), sizeof(BorgListing), 253);
+    swapBorgListing(&dl);
+    uintptr_t addr = (uintptr_t)files + dl.Offset;
+    u8 raw[16] = {};
+    ROMCOPYS(raw, (void *)addr, 16, 254);
+    fprintf(stderr, "[borg-scan] item %d: Type=%d Comp=%d comp=%u uncomp=%u Off=0x%x "
+            "raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+            di, dl.Type, dl.Compression, dl.compressed, dl.uncompressed, dl.Offset,
+            raw[0],raw[1],raw[2],raw[3],raw[4],raw[5],raw[6],raw[7],
+            raw[8],raw[9],raw[10],raw[11],raw[12],raw[13],raw[14],raw[15]);
+  }
+  /* Also check: what if borg_files base is wrong? Try offset 0 (absolute ROM offset) */
+  {
+    BorgListing dl;
+    ROMCOPYS(&dl, (void *)((uintptr_t)listing + 28 * sizeof(BorgListing) + 8), sizeof(BorgListing), 255);
+    swapBorgListing(&dl);
+    /* Try reading from absolute ROM offset (Offset as file offset directly) */
+    u8 raw2[16] = {};
+    ROMCOPYS(raw2, (void *)((uintptr_t)0x10000000 + dl.Offset), 16, 256);
+    fprintf(stderr, "[borg-scan] item 28 alt-base (0x10000000+Offset): "
+            "raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+            raw2[0],raw2[1],raw2[2],raw2[3],raw2[4],raw2[5],raw2[6],raw2[7],
+            raw2[8],raw2[9],raw2[10],raw2[11],raw2[12],raw2[13],raw2[14],raw2[15]);
+  }
 }
 
 u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compression){
