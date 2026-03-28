@@ -31,10 +31,22 @@ void borg8_free_ofunc(Borg8Header *param_1){
 //load "Borg8" image
 //@param index: index of image (see "BORG8_*" #defines)
 //@returns Header of image
+/* Return a valid but empty 1×1 Borg8Header so callers don't crash on NULL */
+static Borg8Header* borg8_empty_stub(u32 index) {
+    static Borg8Header stub = {};
+    stub.dat.Width = 1;
+    stub.dat.Height = 1;
+    stub.dat.format = BORG8_RGBA16;
+    stub.dat.offset = nullptr;
+    stub.dat.palette = nullptr;
+    fprintf(stderr, "[loadBorg8] returning empty stub for index %u\n", index);
+    return &stub;
+}
+
 Borg8Header* loadBorg8(u32 index){
   setBorgFlag();
   borgHeader *item = getBorgItem(index);
-  if (!item) return nullptr;
+  if (!item) return borg8_empty_stub(index);
 
 #ifdef __linux__
   /* On N64, many "BORG8_" indexed assets are actually Type=1 (textures),
@@ -53,7 +65,7 @@ Borg8Header* loadBorg8(u32 index){
       if (b1type > 8 || (b1->dat->Width == 0 && b1->dat->Height == 0)) {
         fprintf(stderr, "[loadBorg8] Borg1 index=%u has invalid header (type=%u W=%u H=%u) – raw pixel data, skipping\n",
                 index, b1type, b1->dat->Width, b1->dat->Height);
-        return nullptr;
+        return borg8_empty_stub(index);
       }
 
       Borg8Header *b8;
