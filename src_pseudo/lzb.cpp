@@ -57,13 +57,6 @@ LAB_800aa3e8:
     uVar5 = (u32)*pbVar1 * 2 + 1;
     uVar6++;
     if ((u32)*pbVar1 * 2 >> 8 != 0) goto LAB_800aa3e8;
-    /* EXPERIMENT: if this is the first byte and it says "match" but no output
-     * exists yet, force it to be a literal instead. If this fixes the output,
-     * the format has a first-token bootstrap rule. */
-    if (iVar9 == 0) {
-      fprintf(stderr, "[lzb] BOOTSTRAP: first byte 0x%02x says match but out=0, forcing literal\n", *(compDat + uVar6 - 1));
-      goto LAB_800aa3e8;
-    }
 LAB_800aa428:
     iVar7 = 1;
     do {

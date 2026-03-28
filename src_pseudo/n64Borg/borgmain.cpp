@@ -305,13 +305,6 @@ borgHeader * getBorgItem(s32 index){
           fflush(stderr);
           return NULL;
         }
-        /* LZB decompressor is currently producing wrong output for all compressed
-         * items in this ROM version.  Skip pointer fixups (borg_funcs_a/b) entirely
-         * to prevent wild pointer crashes.  TODO: fix LZB decompressor. */
-        if (listing.Compression == Compress_LZB) {
-          fprintf(stderr, "[borg] index %d Type=%d: skipping init (LZB output untrusted)\n", index, listing.Type);
-          HFREE(ret,629); return NULL;
-        }
         fprintf(stderr, "[borg] index %d Type=%d: calling borg_funcs_a/b\n", index, listing.Type);
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
@@ -331,10 +324,6 @@ borgHeader * getBorgItem(s32 index){
                          (s32)listing.Compression)) {
             fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping\n", index, listing.Type);
             HFREE(ret,654); return NULL;
-          }
-          if (listing.Compression == Compress_LZB) {
-            fprintf(stderr, "[borg] index %d Type=%d: skipping init (LZB output untrusted)\n", index, listing.Type);
-            HFREE(ret,655); return NULL;
           }
           (*borg_funcs_a[listing.Type])(ret);
           (*borg_funcs_b[listing.Type])(ret,0);
