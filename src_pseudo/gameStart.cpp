@@ -61,6 +61,12 @@ Gfx * RenderFlycam(Gfx *gfx){
   if (!gFlycamSceneP) {
     if ((gGlobals.QueueA.items == 0) && (gGlobals.brightness == 0.0)) {
       flycam_func();
+      if (!gFlycamSceneP) {
+        /* Scene failed to load — skip flycam entirely, just hold brightness at 1 */
+        gGlobals.brightness = 1.0f;
+        gGlobals.screenFadeMode = ScreenFade_None;
+        return apGStackX_0[0];
+      }
       gGlobals.screenFadeMode = ScreenFade_In;
       gGlobals.screenFadeSpeed = 0.01f;
       gfx = apGStackX_0[0];
