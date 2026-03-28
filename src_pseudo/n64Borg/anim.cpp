@@ -1158,6 +1158,7 @@ Borg7Header * loadBorg7(u32 index,ParticleHeadStruct *param_2){
 }
 
 void FUN_8009fca8(Borg7Header *param_1){
+  if (!param_1) return;
   if (param_1->sceneDat)
     Particle::UnsetSceneEmmiter(param_1->sceneDat->particleHead,param_1->sceneDat);
   for(s32 i=0;i<param_1->dat.subCount;i++){
