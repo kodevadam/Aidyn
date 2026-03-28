@@ -1134,6 +1134,7 @@ LAB_8009fb4c:
 }
 
 void borganim_free(SceneData *param_1){
+  if (!param_1) return;
   borg5_free(param_1->borg5);
   HFREE(param_1,2870);
 }
