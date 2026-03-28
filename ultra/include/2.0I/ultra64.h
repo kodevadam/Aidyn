@@ -1053,6 +1053,20 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_RM_FOG_SHADE_A2       0
 #define G_RM_FOG_PRIM_A2        0
 #define G_RM_PASS2              0
+#define G_RM_XLU_SURF2          0
+
+/* Blender color source constants (used in raw render mode expressions) */
+#define G_BL_CLR_IN             0
+#define G_BL_CLR_MEM            1
+#define G_BL_CLR_BL             2
+#define G_BL_CLR_FOG            3
+#define G_BL_A_IN               0
+#define G_BL_A_FOG              1
+#define G_BL_A_SHADE            2
+#define G_BL_1MA                0
+#define G_BL_A_MEM              1
+#define G_BL_1                  2
+#define G_BL_0                  3
 #define G_RM_NOOP2              0
 
 /* Geometry mode flags */
@@ -1195,6 +1209,11 @@ void    osWritebackDCacheAll(void);
 /* On N64, converts KSEG0/KSEG1 address to physical.  On Linux, identity. */
 static inline void *osVirtualToPhysical(void *addr) { return addr; }
 static inline void *osPhysicalToVirtual(void *addr) { return addr; }
+
+/* N64 segment addressing: SEGMENT_ADDR(seg, offset) builds a segment-relative
+   address.  On Linux with flat addressing, segments are resolved at load time,
+   so this is effectively just the offset (segment base added elsewhere). */
+#define SEGMENT_ADDR(seg, off) ((void *)(((u32)(seg) << 24) | (u32)(off)))
 
 OSTime  osGetTime(void);
 u32     osGetMemSize(void);
