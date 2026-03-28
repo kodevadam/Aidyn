@@ -255,13 +255,13 @@ u8 TitleSplash::N64Logo(Gfx**GG){
 
   Gfx*g = *GG;
   auStack64 = gGlobals.titleSplashVars.state;
-  //yeah, sets value directly instead of using setter.
-  (SplashLicence->col)={sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha};
-  if (!SplashLogoModel) {
-    /* Scene failed to load — skip the N64 logo display entirely */
+  if (!SplashLogoModel || !SplashLicence) {
+    /* Assets failed to load — skip the N64 logo display entirely */
     TitleSplash::Timer(&sSplashN64state,&sSplashN64Alpha,NULL,ShowTime,&auStack64,2);
     return auStack64;
   }
+  //yeah, sets value directly instead of using setter.
+  (SplashLicence->col)={sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha};
   Scene::SetModelTint(SplashLogoModel,sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha,0xff);
   if (360.0f < N64LogoRot) N64LogoRot-= 360.0f;
   fVar7 = N64LogoRot * dtor;
