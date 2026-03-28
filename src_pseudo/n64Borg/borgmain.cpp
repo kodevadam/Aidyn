@@ -260,7 +260,14 @@ borgHeader * getBorgItem(s32 index){
         ret->index = -1;
         ret->unk = 0;
       }
-      (*borg_funcs_b[listing.Type])(ret,borgfile);
+      if (!(*borg_funcs_b[listing.Type])(ret,borgfile)) {
+        /* borg_funcs_b (e.g. InitBorgTexture) returned failure — invalid header/data.
+         * Free everything and return NULL so callers know the asset is unusable. */
+        fprintf(stderr, "[borg] borg_funcs_b[%d] failed for index %d, returning NULL\n", listing.Type, index);
+        if (borgFlag) { HFREE(borgfile,605); }
+        HFREE(ret,606);
+        return NULL;
+      }
     }
     else {
       if (borgFlag){
