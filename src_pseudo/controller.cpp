@@ -35,6 +35,10 @@ ContManageStruct gContManager={0};
 #if EUVER
 u8 gContPalVar=false;
 #endif
+#ifdef __linux__
+static u8 sLinuxSyntheticPending[MAXCONTROLLERS] = {1,1,1,1};
+static controller_aidyn sLinuxEmptyInput = {};
+#endif
 
 //init controller thread.
 void Controller::Init(OSSched *sc,u8 ports,u8 pri,u8 id){
@@ -122,7 +126,10 @@ void Controller::ReadInput(void){
   u32 BVar3,buttons;
   float stickY,stickX;
   OSContPad contPad [4];
-  
+
+#ifdef __linux__
+  for (int i = 0; i < MAXCONTROLLERS; i++) sLinuxSyntheticPending[i] = 1;
+#endif
   osSendMesg(&gContManager.contMesgQ,NULL,1);
   osContStartReadData(&gContManager.SIMesgQ);
   osRecvMesg(&gContManager.SIMesgQ,NULL,1);
@@ -496,7 +503,7 @@ s32 Controller::SetJoystick(float H,float V,u8 port){
 //also used in for/while loops for measuring delta w/ dummy arg.
 u8 Controller::GetInput(controller_aidyn** input,u8 port){
   controllerBuffer *buffer;
-  
+
   osSendMesg(&gContManager.contMesgQ,NULL,1);
   buffer = &gContManager.BufferPointer[port];
   if (buffer->ContGet) {
@@ -504,7 +511,22 @@ u8 Controller::GetInput(controller_aidyn** input,u8 port){
     buffer->ContGet--;
     buffer->latest++;
     buffer->latest&=0x7f;
+#ifdef __linux__
+    sLinuxSyntheticPending[port] = 0;
+#endif
   }
+#ifdef __linux__
+  else if (sLinuxSyntheticPending[port]) {
+    /* No real input buffered. Inject one synthetic empty input so
+     * while(GetInput) loops (used as frame-tick counters) run at least
+     * once per game frame. Return 1 to enter, next call returns 0. */
+    memset(&sLinuxEmptyInput, 0, sizeof(sLinuxEmptyInput));
+    *input = &sLinuxEmptyInput;
+    sLinuxSyntheticPending[port] = 0;
+    osRecvMesg(&gContManager.contMesgQ,NULL,1);
+    return 1;
+  }
+#endif
   osRecvMesg(&gContManager.contMesgQ,NULL,1);
   return (buffer->ContGet);
 }
