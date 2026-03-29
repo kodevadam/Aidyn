@@ -571,10 +571,19 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
         return;
     }
 
+    { static int dlStartLog = 0;
+      if (dlStartLog < 6 && depth == 0) {
+        fprintf(stderr, "[gfx] process_display_list START: dl=%p depth=%d\n", (void*)dl, depth);
+        dlStartLog++;
+      }
+    }
+
     int maxCmds = 10000;
+    int cmdCount = 0;
     for (; maxCmds > 0; maxCmds--) {
         u8 cmd = (u8)(dl->w.hi >> 24);
         sDLStats[cmd]++;
+        cmdCount++;
 
         switch (cmd) {
         case G_SPNOOP:
@@ -585,6 +594,12 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             break;
 
         case G_ENDDL:
+            { static int dlEndLog = 0;
+              if (dlEndLog < 6 && depth == 0) {
+                fprintf(stderr, "[gfx] process_display_list END: dl_end=%p cmdCount=%d\n", (void*)dl, cmdCount);
+                dlEndLog++;
+              }
+            }
             return;
 
         case G_DL: {
