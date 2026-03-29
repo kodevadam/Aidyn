@@ -181,14 +181,16 @@ LAB_800aa598:
     if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
     pbVar1 = OutDat - uVar8;
     iVar9++;
-    *OutDat = *pbVar1;
+    /* Safe read: if back-reference points before output start, read 0
+     * (N64 uses a zeroed dictionary for pre-output references) */
+    *OutDat = (pbVar1 < OutDatStart) ? 0 : *pbVar1;
     OutDat++;
     do {
       if (iVar9 >= (s32)maxOut) break;
       pbVar1++;
       iVar9++;
       iVar7--;
-      *OutDat = *pbVar1;
+      *OutDat = (pbVar1 < OutDatStart) ? 0 : *pbVar1;
       OutDat++;
     } while (iVar7 != 0);
   } while (iVar9 < (s32)maxOut);
