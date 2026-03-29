@@ -40,11 +40,19 @@ namespace GfxBackend {
 
 static SDL_Window   *sWindow   = nullptr;
 static SDL_GLContext sGLCtx    = nullptr;
-static SDL_Renderer *sRenderer = nullptr;   /* used in software mode */
+static SDL_Surface  *sSurface  = nullptr;   /* used in software mode */
 static int           sWidth    = 640;   /* 2× native 320 */
 static int           sHeight   = 480;   /* 2× native 240 */
 static bool          sRunning  = false;
 static bool          sSoftware = false;     /* true = SDL2 software renderer */
+
+static void present_software_frame(Uint8 r, Uint8 g, Uint8 b) {
+    if (!sWindow || !sSurface) return;
+
+    Uint32 color = SDL_MapRGB(sSurface->format, r, g, b);
+    SDL_FillRect(sSurface, nullptr, color);
+    SDL_UpdateWindowSurface(sWindow);
+}
 
 /* VI (video interface) overrides from osViSetMode() */
 static OSViMode *sCurrentMode  = nullptr;
@@ -66,19 +74,17 @@ static bool init_software(int width, int height) {
     }
     fprintf(stderr, "[gfx]   Window created OK\n");
 
-    sRenderer = SDL_CreateRenderer(sWindow, -1, SDL_RENDERER_SOFTWARE);
-    if (!sRenderer) {
-        fprintf(stderr, "[gfx] FATAL: SDL_CreateRenderer(SOFTWARE) failed: %s\n", SDL_GetError());
+    sSurface = SDL_GetWindowSurface(sWindow);
+    if (!sSurface) {
+        fprintf(stderr, "[gfx] FATAL: SDL_GetWindowSurface failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(sWindow);
         sWindow = nullptr;
         return false;
     }
-    fprintf(stderr, "[gfx]   Software renderer created OK\n");
+    fprintf(stderr, "[gfx]   Software surface acquired OK\n");
 
     /* Test clear + present */
-    SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
-    SDL_RenderClear(sRenderer);
-    SDL_RenderPresent(sRenderer);
+    present_software_frame(0, 0, 0);
     return true;
 }
 
@@ -192,11 +198,10 @@ bool Init(int width, int height, bool softwareMode) {
 
 void Shutdown() {
     fprintf(stderr, "[gfx] Shutdown...\n");
-    if (sRenderer) SDL_DestroyRenderer(sRenderer);
     if (sGLCtx)    SDL_GL_DeleteContext(sGLCtx);
     if (sWindow)   SDL_DestroyWindow(sWindow);
     SDL_Quit();
-    sRenderer = nullptr;
+    sSurface  = nullptr;
     sGLCtx    = nullptr;
     sWindow   = nullptr;
     sRunning  = false;
@@ -220,7 +225,11 @@ bool PollEvents() {
             if (ev.window.event == SDL_WINDOWEVENT_RESIZED) {
                 sWidth  = ev.window.data1;
                 sHeight = ev.window.data2;
-                if (!sSoftware) glViewport(0, 0, sWidth, sHeight);
+                if (!sSoftware) {
+                    glViewport(0, 0, sWidth, sHeight);
+                } else {
+                    sSurface = SDL_GetWindowSurface(sWindow);
+                }
             }
             break;
         default:
@@ -434,10 +443,7 @@ void StubFrame(unsigned long frameCount) {
     float b = 0.08f + 0.06f * sinf(t * 6.2832f + 4.189f);
 
     if (sSoftware) {
-        SDL_SetRenderDrawColor(sRenderer,
-            (Uint8)(r * 255), (Uint8)(g * 255), (Uint8)(b * 255), 255);
-        SDL_RenderClear(sRenderer);
-        SDL_RenderPresent(sRenderer);
+        present_software_frame((Uint8)(r * 255), (Uint8)(g * 255), (Uint8)(b * 255));
     } else {
         glClearColor(r, g, b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -450,9 +456,7 @@ void SubmitFrame(OSScTask *task) {
 
     if (sSoftware) {
         /* Software mode: just clear and present for now */
-        SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
-        SDL_RenderClear(sRenderer);
-        SDL_RenderPresent(sRenderer);
+        present_software_frame(0, 0, 0);
     } else {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -476,9 +480,7 @@ extern "C" void osViSetMode(OSViMode *mode) {
 extern "C" void osViBlack(u8 active) {
     if (active && sWindow) {
         if (sSoftware) {
-            SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
-            SDL_RenderClear(sRenderer);
-            SDL_RenderPresent(sRenderer);
+            present_software_frame(0, 0, 0);
         } else {
             glClearColor(0,0,0,1);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -494,7 +496,7 @@ extern "C" void osViSwapBuffer(void *buffer) {
     (void)buffer;
     if (sWindow) {
         if (sSoftware)
-            SDL_RenderPresent(sRenderer);
+            SDL_UpdateWindowSurface(sWindow);
         else
             SDL_GL_SwapWindow(sWindow);
     }
