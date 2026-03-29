@@ -39,16 +39,21 @@ void borg8_free_ofunc(Borg8Header *param_1){
 //load "Borg8" image
 //@param index: index of image (see "BORG8_*" #defines)
 //@returns Header of image
-/* Return a valid but empty 1×1 Borg8Header so callers don't crash on NULL */
+/* Return a valid but empty 1×1 Borg8Header so callers don't crash on NULL.
+ * Each call allocates a fresh header so it can be safely freed by borg8_free. */
 static Borg8Header* borg8_empty_stub(u32 index) {
-    static Borg8Header stub = {};
-    stub.dat.Width = 1;
-    stub.dat.Height = 1;
-    stub.dat.format = BORG8_RGBA16;
-    stub.dat.offset = nullptr;
-    stub.dat.palette = nullptr;
+    Borg8Header *stub;
+    ALLOCS(stub, sizeof(Borg8Header), 36);
+    if (!stub) return nullptr;
+    memset(stub, 0, sizeof(Borg8Header));
+    stub->head.index = -1;
+    stub->dat.Width = 1;
+    stub->dat.Height = 1;
+    stub->dat.format = BORG8_RGBA16;
+    stub->dat.offset = nullptr;
+    stub->dat.palette = nullptr;
     fprintf(stderr, "[loadBorg8] returning empty stub for index %u\n", index);
-    return &stub;
+    return stub;
 }
 
 Borg8Header* loadBorg8(u32 index){
@@ -264,11 +269,14 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
   hVis = (u32)h - (u32)xOff;
   fVar36 = x * sImageHScale;
   uVar1 = (borg8->dat).Width;
+  /* Guard: zero-size draws cause division underflow → skip */
+  if (h <= xOff || v <= yOff || hVis == 0) return g;
   gDPPipeSync(g++);
   gDPSetPrimColor(g++,0,0,red,green,blue,alpha);
   uVar16 = (u32)yOff;
   fVar33 = 4.0f;
   vVis = (u32)v - (u32)yOff;
+  if (vVis == 0) return g;
   fVar37 = y * sImageVScale * 4.0f;
   iVar29 = (int)((float)(int)hVis * imgXScale * 4.0f);
   iVar31 = (int)(fVar36 * 4.0f);
