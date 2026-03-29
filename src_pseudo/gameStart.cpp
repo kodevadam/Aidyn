@@ -30,6 +30,12 @@ void flycam_func(void){
   gGlobals.brightness = 0.0;
   gGlobals.screenFadeMode = ScreenFade_In;
   gGlobals.screenFadeSpeed = (2.0/30);
+#ifdef __linux__
+  /* Borg6 (animation) assets can't load on Linux yet — skip flycam setup */
+  gFlycamBorg6P = NULL;
+  gFlycamSceneP = NULL;
+  return;
+#endif
   gFlycamBorg6P = loadBorg6(gFlycamSequences[flycam_counter].borg6);
   if (!gFlycamBorg6P || !gFlycamBorg6P->dat) {
     fprintf(stderr, "[gameStart] flycam borg6 failed to load, skipping scene setup\n");
