@@ -262,6 +262,15 @@ Gfx * borg8DlistInit(Gfx *gfx,u8 flag,u16 h,u16 v){
 //@returns display list change
 Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yOff,u16 h,u16 v,
                       float xScale,float yScale,u8 red,u8 green,u8 blue,u8 alpha) {
+  { static int entryLog = 0;
+    if (entryLog < 3 && borg8 && (borg8->dat).offset && (uintptr_t)(borg8->dat).offset > 0x40000000) {
+      fprintf(stderr, "[borg8draw] ENTRY: borg8=%p offset=%p W=%u H=%u fmt=%u g=%p h=%u v=%u xOff=%u yOff=%u\n",
+              (void*)borg8, (borg8->dat).offset, (borg8->dat).Width, (borg8->dat).Height,
+              (borg8->dat).format, (void*)g, (unsigned)h, (unsigned)v, (unsigned)xOff, (unsigned)yOff);
+      fflush(stderr);
+      entryLog++;
+    }
+  }
   u16 uVar1;
   s16 dsdx16;
   u32 uVar4;
