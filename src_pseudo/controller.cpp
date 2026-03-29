@@ -35,6 +35,10 @@ ContManageStruct gContManager={0};
 #if EUVER
 u8 gContPalVar=false;
 #endif
+#ifdef __linux__
+static u8 sLinuxSyntheticPending[MAXCONTROLLERS] = {1,1,1,1};
+static controller_aidyn sLinuxEmptyInput = {};
+#endif
 
 //init controller thread.
 void Controller::Init(OSSched *sc,u8 ports,u8 pri,u8 id){
@@ -122,7 +126,10 @@ void Controller::ReadInput(void){
   u32 BVar3,buttons;
   float stickY,stickX;
   OSContPad contPad [4];
-  
+
+#ifdef __linux__
+  for (int i = 0; i < MAXCONTROLLERS; i++) sLinuxSyntheticPending[i] = 1;
+#endif
   osSendMesg(&gContManager.contMesgQ,NULL,1);
   osContStartReadData(&gContManager.SIMesgQ);
   osRecvMesg(&gContManager.SIMesgQ,NULL,1);
@@ -496,7 +503,38 @@ s32 Controller::SetJoystick(float H,float V,u8 port){
 //also used in for/while loops for measuring delta w/ dummy arg.
 u8 Controller::GetInput(controller_aidyn** input,u8 port){
   controllerBuffer *buffer;
-  
+
+#ifdef __linux__
+  /* On Linux, try non-blocking acquire of the controller mutex.
+   * If the controller thread holds it, skip the real buffer and
+   * use synthetic input instead of deadlocking. */
+  if (osSendMesg(&gContManager.contMesgQ, NULL, OS_MESG_NOBLOCK) != 0) {
+    /* Mutex busy — inject synthetic if available */
+    if (sLinuxSyntheticPending[port]) {
+      memset(&sLinuxEmptyInput, 0, sizeof(sLinuxEmptyInput));
+      *input = &sLinuxEmptyInput;
+      sLinuxSyntheticPending[port] = 0;
+      return 1;
+    }
+    return 0;
+  }
+  buffer = &gContManager.BufferPointer[port];
+  if (buffer->ContGet) {
+    *input = &buffer->inputlog[buffer->latest].contAidyn;
+    buffer->ContGet--;
+    buffer->latest++;
+    buffer->latest &= 0x7f;
+    sLinuxSyntheticPending[port] = 0;
+  } else if (sLinuxSyntheticPending[port]) {
+    memset(&sLinuxEmptyInput, 0, sizeof(sLinuxEmptyInput));
+    *input = &sLinuxEmptyInput;
+    sLinuxSyntheticPending[port] = 0;
+    osRecvMesg(&gContManager.contMesgQ, NULL, 1);
+    return 1;
+  }
+  osRecvMesg(&gContManager.contMesgQ, NULL, 1);
+  return (buffer->ContGet);
+#else
   osSendMesg(&gContManager.contMesgQ,NULL,1);
   buffer = &gContManager.BufferPointer[port];
   if (buffer->ContGet) {
@@ -507,6 +545,7 @@ u8 Controller::GetInput(controller_aidyn** input,u8 port){
   }
   osRecvMesg(&gContManager.contMesgQ,NULL,1);
   return (buffer->ContGet);
+#endif
 }
 
 //decrpyt string from PFS back to ASCII
@@ -567,8 +606,13 @@ LAB_8009c6c0:
 
 //Count the attempts to Get controller input.
 u16 Controller::GetDelay(u8 port){
-  controller_aidyn* temp=NULL;  
+  controller_aidyn* temp=NULL;
   u16 x = 0;
   while (GetInput(&temp,port)) {x++;}
+#ifdef __linux__
+  /* On Linux, ensure at least 1 tick so game logic advances even when
+   * the controller thread isn't feeding input at the retrace rate. */
+  if (x == 0) x = 1;
+#endif
   return x;
 }

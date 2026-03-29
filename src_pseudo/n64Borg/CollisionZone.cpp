@@ -11,6 +11,12 @@ void * set_pointer_offset(void *A,void *B){
 #define Borg9SetPointer(x,f) x.f=decltype(x.f)(set_pointer_offset(&x,x.f));
 
 void borg9_func_a(Borg9Header *param_1){
+#ifdef __linux__
+  /* Borg9 pointer fixup uses N64 32-bit pointer layout which is incompatible
+   * with 64-bit Linux. Skip fixup — borg9 collision data not yet supported. */
+  fprintf(stderr, "[CollisionZone] borg9_func_a: skipping pointer fixup on Linux\n");
+  return;
+#else
   u16 i,j;
   Borg9SetPointer(param_1->dat,collideCount);
   Borg9SetPointer(param_1->dat,someint);
@@ -36,6 +42,7 @@ void borg9_func_a(Borg9Header *param_1){
       p->voxelIndecies = (u16*)set_pointer_offset(p->voxelIndecies,(param_1->dat).lightCount);
     }
   }
+#endif
 }
 
 void n64BorgCollisionZone_free(Borg9Header *param_1){

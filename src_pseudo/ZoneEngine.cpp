@@ -572,13 +572,9 @@ void loadGameBorgScenes(u16 ShortA,u16 ShortB){
   loading_map_data(&MAPCENTER);
   if ((MAPCENTER.borg5_ID == 0) ||
      (uVar21 = 1, MAPCENTER.borg9_id == 0)) {
-    playerData* ppVar9 = gPlayer;
-    if (gGlobals.gameStateA == GameStateA_Combat) {
-      ppVar9 = gGlobals.combatActors[gCombatP->current_Ent->index];
-    }
-    Gsprintf("Center scene not in Borg.\nPlayer Pos: (%3.4f, %3.4f)\nNew Grid: %d-%c%02d",
-      (ppVar9->collision).pos.x,(ppVar9->collision).pos.z,gGlobals.gameVars.mapDatA,gGlobals.gameVars.mapShort1 - 1 + 'A',gGlobals.gameVars.mapShort2);
-    CRASH("LoadGameBorgScenes",gGlobals.text);
+    fprintf(stderr, "[zone] Center scene not in Borg (borg5=%d borg9=%d) — zone data missing\n",
+            MAPCENTER.borg5_ID, MAPCENTER.borg9_id);
+    return;
   }
   uVar22 = (u32)((MAPCENTER.mapPointer)->dat).byte0x1a;
   uVar11 = uVar22 & 1;
@@ -596,6 +592,7 @@ void loadGameBorgScenes(u16 ShortA,u16 ShortB){
         z->alpha = 0xff;
         if (z->index == ZoneCenter) {
           z->sceneDat0x4 = BorgAnimLoadScene(z->borg5_ID);
+          if (!z->sceneDat0x4) fprintf(stderr, "[ZoneEngine] BorgAnimLoadScene(%u) failed for zone center sceneDat0x4\n", z->borg5_ID);
         }
         else {
           #if DEBUGVER
@@ -609,6 +606,7 @@ void loadGameBorgScenes(u16 ShortA,u16 ShortB){
       if ((z->borg5_ID2) && (z->SceneDat0x14 == NULL)) {
         if (z->index == ZoneCenter) {
           z->SceneDat0x14 = BorgAnimLoadScene(z->borg5_ID2);
+          if (!z->SceneDat0x14) fprintf(stderr, "[ZoneEngine] BorgAnimLoadScene(%u) failed for zone center SceneDat0x14\n", z->borg5_ID2);
         }
         else 
         #if DEBUGVER
@@ -932,6 +930,10 @@ void ConfirmPlayerWithinZone(playerData *param_1,Borg9Data *param_2){
 
 SceneData * load_borg_5_func(u32 b5){
   SceneData *scene= BorgAnimLoadScene(b5);
+  if (!scene) {
+    fprintf(stderr, "[ZoneEngine] load_borg_5_func: BorgAnimLoadScene(%u) failed\n", b5);
+    return NULL;
+  }
   Scene::SetFlag4(scene);
   Scene::SetFlag40(scene);
   Scene::SetFogFlag(scene);
@@ -1222,6 +1224,7 @@ LAB_80010084:
               sVar8 = (s16)local_60;
               if (NoExpPak_memCheck(MEMCHECK_Borg7)) {
                 pBVar3 = loadBorg7((SObj->scene).borgArray[0].borgIndex,&gGlobals.gameVars.particleHead);
+                if (!pBVar3) goto LAB_800102b4;
                 (SObj->scene).borgArray[0].b7 = pBVar3;
                 pAVar4 = pBVar3->sceneDat;
                 Borg7_SetAnimation(pBVar3,0);
@@ -1235,6 +1238,7 @@ LAB_80010084:
                   Borg7_TickAnimation((SObj->scene).borgArray[0].b7,2);
                 }
 LAB_8000ffcc:
+                if (!pAVar4) goto LAB_800102b4;
                 guMtxIdentF(pAVar4->matrixA);
                 guMtxIdentF(pAVar4->matrixB);
                 Scene::SetFlag10(pAVar4);

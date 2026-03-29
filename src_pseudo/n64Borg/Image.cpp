@@ -1,5 +1,13 @@
 #include "n64Borg.h"
 #include "crash.h"
+#include "romcopy.h"
+#ifdef __linux__
+#include "endian_swap.h"
+static inline void swapBorgListing_img(BorgListing *l) {
+    BE16S(l->Type); BE16S(l->Compression);
+    BE32S(l->compressed); BE32S(l->uncompressed); BE32S(l->Offset);
+}
+#endif
 
 #define FILENAME "./src/n64BorgImage.cpp"
 
@@ -31,9 +39,165 @@ void borg8_free_ofunc(Borg8Header *param_1){
 //load "Borg8" image
 //@param index: index of image (see "BORG8_*" #defines)
 //@returns Header of image
+/* Return a valid but empty 1×1 Borg8Header so callers don't crash on NULL.
+ * Each call allocates a fresh header so it can be safely freed by borg8_free. */
+static Borg8Header* borg8_empty_stub(u32 index) {
+    Borg8Header *stub;
+    ALLOCS(stub, sizeof(Borg8Header), 36);
+    if (!stub) return nullptr;
+    memset(stub, 0, sizeof(Borg8Header));
+    stub->head.index = -1;
+    stub->dat.Width = 1;
+    stub->dat.Height = 1;
+    stub->dat.format = BORG8_RGBA16;
+    stub->dat.offset = nullptr;
+    stub->dat.palette = nullptr;
+    fprintf(stderr, "[loadBorg8] returning empty stub for index %u\n", index);
+    return stub;
+}
+
 Borg8Header* loadBorg8(u32 index){
   setBorgFlag();
-  return (Borg8Header *)getBorgItem(index);}
+  borgHeader *item = getBorgItem(index);
+  if (!item) return borg8_empty_stub(index);
+
+#ifdef __linux__
+  /* On N64 (32-bit), loadBorg8 casts Borg1Header* to Borg8Header*.
+   * On 64-bit Linux we must construct the Borg8Header manually.
+   *
+   * The N64 overlay between Borg1Header and Borg8Header depends on the
+   * allocation layout (combined vs. separate).  Rather than replicate that
+   * fragile overlay, we reconstruct Borg8 fields from the parsed Borg1Data
+   * and the raw N64 data blob. */
+  s16 listingType = get_borg_listing_type(index);
+  if (listingType == 1) {
+    Borg1Header *b1 = (Borg1Header *)item;
+    if (!b1->dat) return borg8_empty_stub(index);
+
+    u16 b1type = b1->dat->type;
+    if (b1type > 8) return borg8_empty_stub(index);
+
+    /* Log all Borg1Data fields for diagnostics */
+    fprintf(stderr, "[loadBorg8] index=%u Borg1Data: type=%u flag=0x%04x W=%u H=%u lods=%u move=%u "
+            "dList=%p bmp=%p pal=%p unk14=0x%x\n",
+            index, b1->dat->type, b1->dat->flag, b1->dat->Width, b1->dat->Height,
+            b1->dat->lods, b1->dat->move,
+            (void*)b1->dat->dList, (void*)b1->dat->bmp, (void*)b1->dat->pallette,
+            b1->dat->unk14);
+
+    Borg8Header *b8;
+    ALLOCS(b8, sizeof(Borg8Header), 35);
+    if (!b8) return borg8_empty_stub(index);
+    b8->head = *item;
+
+    static const u16 b1_to_b8[] = {
+      BORG8_RGBA16, BORG8_IA16, BORG8_CI8, BORG8_IA8,
+      BORG8_I8, BORG8_CI4, BORG8_IA4, BORG8_I4, BORG8_RBGA32
+    };
+    b8->dat.format = (b1type < 9) ? b1_to_b8[b1type] : BORG8_RGBA16;
+    b8->dat.unk06  = ((u16)b1->dat->lods << 8) | (u16)b1->dat->move;
+
+    /* Bitmap and palette pointers.
+     * On N64 overlay: palette = dList field, offset = bmp field.
+     * Our parsed Borg1Data has these as host pointers. */
+    b8->dat.offset  = (void *)b1->bitmapA;
+
+    /* For CI formats, palette lives at dList position in the N64 overlay.
+     * For non-CI formats, palette = NULL. */
+    bool isCI = (b1type == 2 || b1type == 5); /* B1_CI8 or B1_CI4 */
+    b8->dat.palette = isCI ? (u16 *)b1->dat->dList : nullptr;
+    /* Fallback: if dList was NULL but pallette was set, use pallette */
+    if (isCI && !b8->dat.palette && b1->dat->pallette)
+      b8->dat.palette = b1->dat->pallette;
+
+    /* Width and Height reconstruction.
+     *
+     * On N64 the Borg8 overlay reads Width and Height from fields that
+     * overlap with the Borg1 data differently depending on the allocation
+     * layout.  The Borg1Data u8 Width/Height fields (max 255) aren't enough
+     * for larger textures like font atlases.
+     *
+     * Strategy: use the Borg1Data.flag as Width (the N64 overlay interprets
+     * flag as Borg8.Width in the combined allocation layout), then compute
+     * Height from the bitmap size.  If flag is 0 or unreasonable, fall back
+     * to the u8 Width. */
+    u16 b1flag = b1->dat->flag;
+    u8  w8     = b1->dat->Width;
+    u8  h8     = b1->dat->Height;
+
+    /* Bytes per pixel for height computation */
+    u32 bpp = 2; /* RGBA16 default */
+    switch (b1type) {
+      case 2: case 3: case 4: bpp = 1; break; /* CI8, IA8, I8 */
+      case 5: case 6: case 7: bpp = 1; break; /* CI4/IA4/I4 half-byte, but stride is in pixels */
+      case 8: bpp = 4; break; /* RGBA32 */
+    }
+
+    /* Determine real width: try flag first, fall back to u8 Width */
+    u16 realW = (b1flag > 0 && b1flag <= 1024) ? b1flag : (u16)w8;
+
+    /* Determine real height from bitmap byte count */
+    u16 realH = (u16)h8;
+    BorgListing bl;
+    extern void *BorgListingPointer;
+    if ((s32)index >= 0 && (s32)index < 4328 && b1->bitmapA) {
+      ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),
+               sizeof(BorgListing), 37);
+      swapBorgListing_img(&bl);
+      u32 totalData = bl.uncompressed;
+
+      /* Compute bitmap offset: difference between bmp pointer and raw data start.
+       * The raw data start = bmp - bmp_raw_offset. We can find the raw base from
+       * the dList pointer: dList is at raw + dList_offset.
+       * If both bmp and dList are available, rawBase = min(bmp, dList) - smallest_offset.
+       *
+       * Simpler: bitmap bytes = totalData - bmpOffset. Try to recover bmpOffset
+       * from the pointer difference between bmp and the earliest known pointer. */
+      u32 bmpOff = 0x18; /* default: 24-byte Borg1Data header */
+
+      /* If we have both dList and bmp pointers, compute bmpOff from their difference */
+      if (b1->dat->dList && b1->dat->bmp) {
+        uintptr_t dListAddr = (uintptr_t)b1->dat->dList;
+        uintptr_t bmpAddr   = (uintptr_t)b1->dat->bmp;
+        /* rawBase = min of (dListAddr, bmpAddr) minus its offset.
+         * For CI8: dList is likely at offset 24 (palette), bmp after palette. */
+        if (bmpAddr > dListAddr) {
+          /* dList (palette) comes first, bmp comes after */
+          bmpOff = (u32)(bmpAddr - dListAddr) + 24; /* dList typically at offset 24 */
+        }
+      }
+
+      u32 bitmapBytes = (totalData > bmpOff) ? totalData - bmpOff : 0;
+      if (realW > 0 && bpp > 0 && bitmapBytes > 0) {
+        u32 stride = realW;
+        /* For 4-bit formats, 2 pixels per byte */
+        if (b1type == 5 || b1type == 6 || b1type == 7)
+          stride = (realW + 1) / 2;
+        else
+          stride = realW * bpp;
+
+        u32 computedH = bitmapBytes / stride;
+        if (computedH > 0 && computedH <= 2048) {
+          realH = (u16)computedH;
+        }
+      }
+
+      fprintf(stderr, "[loadBorg8] index=%u: listing uncomp=%u bmpOff=%u bitmapBytes=%u → W=%u H=%u (b1flag=%u w8=%u h8=%u)\n",
+              index, totalData, bmpOff, bitmapBytes, realW, realH, b1flag, w8, h8);
+    }
+
+    b8->dat.Width  = realW;
+    b8->dat.Height = realH;
+
+    fprintf(stderr, "[loadBorg8] Borg1→Borg8: index=%u fmt=%u W=%u H=%u bmp=%p pal=%p\n",
+            index, b8->dat.format, b8->dat.Width, b8->dat.Height,
+            b8->dat.offset, (void*)b8->dat.palette);
+    return b8;
+  }
+#endif
+
+  return (Borg8Header *)item;
+}
 
 
 //gets called before almost every borg8 draw command
@@ -46,8 +210,8 @@ Gfx * borg8DlistInit(Gfx *gfx,u8 flag,u16 h,u16 v){
   u32 word1;
   u32 word0;
   
-  sImageHScale = h / (float)SCREEN_WIDTH;
-  sImageVScale = v / (float)SCREEN_HEIGHT;
+  sImageHScale = (h > 0) ? h / (float)SCREEN_WIDTH : 1.0f;
+  sImageVScale = (v > 0) ? v / (float)SCREEN_HEIGHT : 1.0f;
   gDPPipeSync(gfx++);
   gDPSetCycleType(gfx++,G_CYC_1CYCLE);
   gDPPipelineMode(gfx++,G_PM_1PRIMITIVE);
@@ -98,6 +262,15 @@ Gfx * borg8DlistInit(Gfx *gfx,u8 flag,u16 h,u16 v){
 //@returns display list change
 Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yOff,u16 h,u16 v,
                       float xScale,float yScale,u8 red,u8 green,u8 blue,u8 alpha) {
+  { static int entryLog = 0;
+    if (entryLog < 3 && borg8 && (borg8->dat).offset && (uintptr_t)(borg8->dat).offset > 0x40000000) {
+      fprintf(stderr, "[borg8draw] ENTRY: borg8=%p offset=%p W=%u H=%u fmt=%u g=%p h=%u v=%u xOff=%u yOff=%u\n",
+              (void*)borg8, (borg8->dat).offset, (borg8->dat).Width, (borg8->dat).Height,
+              (borg8->dat).format, (void*)g, (unsigned)h, (unsigned)v, (unsigned)xOff, (unsigned)yOff);
+      fflush(stderr);
+      entryLog++;
+    }
+  }
   u16 uVar1;
   s16 dsdx16;
   u32 uVar4;
@@ -138,14 +311,30 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
   imgXScale = xScale * sImageHScale;
   void*BMP = (borg8->dat).offset;
   imgYScale = yScale * sImageVScale;
+  /* Guard: zero scale causes SIGFPE in 1024.0/scale → (int)inf conversion */
+  if (imgXScale == 0.0f) imgXScale = 1.0f;
+  if (imgYScale == 0.0f) imgYScale = 1.0f;
   hVis = (u32)h - (u32)xOff;
   fVar36 = x * sImageHScale;
   uVar1 = (borg8->dat).Width;
+  { static int drawLog = 0;
+    if (drawLog < 3 && BMP != nullptr && (uintptr_t)BMP > 0x40000000) {
+      fprintf(stderr, "[borg8draw] FONT BMP=%p W=%u fmt=%u h=%u xOff=%u v=%u yOff=%u hVis=%u g_before=%p\n",
+              BMP, (borg8->dat).Width, (borg8->dat).format,
+              (unsigned)h, (unsigned)xOff, (unsigned)v, (unsigned)yOff,
+              hVis, (void*)g);
+      fflush(stderr);
+      drawLog++;
+    }
+  }
+  /* Guard: zero-size draws cause division underflow → skip */
+  if (h <= xOff || v <= yOff || hVis == 0) return g;
   gDPPipeSync(g++);
   gDPSetPrimColor(g++,0,0,red,green,blue,alpha);
   uVar16 = (u32)yOff;
   fVar33 = 4.0f;
   vVis = (u32)v - (u32)yOff;
+  if (vVis == 0) return g;
   fVar37 = y * sImageVScale * 4.0f;
   iVar29 = (int)((float)(int)hVis * imgXScale * 4.0f);
   iVar31 = (int)(fVar36 * 4.0f);
@@ -271,6 +460,16 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
     Borg8LoadTextureBlock(g++,BMP,fmt,G_IM_SIZ_8b,borg8->dat.Width,hVis,xOff,yOff,yOff,vVis - 1);
     gSPScisTextureRectangle(g++, sVar28, fVar37, (iVar31 + iVar29), (fVar37 + (float)dVar35 * imgYScale * 4.0f),
      0, 0, 0, dsdx16, dtdy16);
+    { static int ci8Log = 0;
+      if (ci8Log < 3 && BMP != nullptr && (uintptr_t)BMP > 0x40000000) {
+        /* Check what was actually written to the display list */
+        Gfx *check = g - 11; /* approximate: back up to where SETTIMG should be */
+        fprintf(stderr, "[borg8draw] CI8 done: BMP=%p g_after=%p pal=%p iters=%u vVis=%u check_cmd=0x%08x check_addr=0x%08x\n",
+                BMP, (void*)g, (void*)(borg8->dat).palette, iters, vVis,
+                (check >= (g-20)) ? check->w.hi : 0, (check >= (g-20)) ? check->w.lo : 0);
+        ci8Log++;
+      }
+    }
     break;
   case BORG8_CI4:
   case BORG8_IA4:

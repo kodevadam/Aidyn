@@ -11,7 +11,7 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
   u32 uVar5 = 0;
   u32 uVar6 = 0;
   s32 iVar7 = 1;
-  u32 uVar8;
+  u32 uVar8 = 1;  /* must be initialized; first iVar7==2 means "reuse" */
   s32 iVar9 = 0;
   u8 *OutDatStart = OutDat;
   u32 maxOut = *outSize;
@@ -25,12 +25,15 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
     } \
   } while(0)
 
+  /* Diagnostic: dump first 16 bytes of compressed input */
+  {
+    fprintf(stderr, "[lzb] compressed first 16:");
+    for (u32 i = 0; i < 16 && i < CompSize; i++) fprintf(stderr, " %02x", compDat[i]);
+    fprintf(stderr, " (CompSize=%u maxOut=%u)\n", CompSize, maxOut);
+  }
+
   do {
     iter++;
-    if (iter <= 5 || (iter % 500 == 0)) {
-      fprintf(stderr, "[lzb] iter=%u in=%u/%u out=%d/%u uVar5=0x%x\n",
-              iter, uVar6, CompSize, iVar9, maxOut, uVar5);
-    }
     while( true ) {
       uVar5 <<= 1;
       if ((uVar5 & 0xff) == 0) break;
@@ -38,8 +41,10 @@ s32 decompress_LZB(u8 *compDat,u32 CompSize,u8 *OutDat,u32 *outSize){
         goto LAB_800aa428;
       }
 LAB_800aa3e8:
+      if (iVar9 >= (s32)maxOut) goto LZB_DONE;
       LZB_CHECK_IN("literal");
       pbVar1 = compDat + uVar6;
+      if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: literal byte=0x%02x in=%u out=%d uVar5=0x%x\n", iter, *pbVar1, uVar6, iVar9, uVar5);
       uVar6++;
       iVar9++;
       *OutDat = *pbVar1;
@@ -47,6 +52,8 @@ LAB_800aa3e8:
     }
     LZB_CHECK_IN("control");
     pbVar1 = compDat + uVar6;
+    if (iter <= 10) fprintf(stderr, "[lzb] iter=%u: load byte=0x%02x in=%u → uVar5=0x%x MSB=%u\n",
+            iter, *pbVar1, uVar6, (u32)*pbVar1 * 2 + 1, (u32)*pbVar1 * 2 >> 8);
     uVar5 = (u32)*pbVar1 * 2 + 1;
     uVar6++;
     if ((u32)*pbVar1 * 2 >> 8 != 0) goto LAB_800aa3e8;
@@ -76,29 +83,38 @@ LAB_800aa428:
       uVar6++;
     } while ((u32)*pbVar1 * 2 >> 8 == 0);
 LAB_800aa478:
+    if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: elias result iVar7=%d in=%u out=%d\n", iter, iVar7, uVar6, iVar9);
     if (iVar7 != 2) {
       LZB_CHECK_IN("offset-byte");
-      iVar7 = (iVar7 + -3) * 0x100 + (u32)compDat[uVar6];
-      uVar6++;
-      if (iVar7 == -1) {
-        fprintf(stderr, "[lzb] EOS found: in=%u/%u out=%d iter=%u\n",
-                uVar6, CompSize, iVar9, iter);
-        *outSize = iVar9;
-        if (uVar6 == CompSize) {
-          errOut = 0;
+      if (0) fprintf(stderr, "[lzb] iter=%u: offset extra byte=0x%02x → iVar7=(%d-3)*256+%u=%d\n",
+              iter, compDat[uVar6], iVar7, (u32)compDat[uVar6], (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6]);
+      {
+        /* The offset byte is signed (lb on MIPS, not lbu). This is required
+         * for the end marker: Elias=3, byte=0xFF → offset=-1.
+         * For other negative offsets (Elias=3, byte 0x80-0xFE), the N64's
+         * 32-bit unsigned arithmetic wraps the distance to a FORWARD reference:
+         *   dist = offset+1 (negative) → u32 → OutDat-dist wraps to OutDat+small
+         * This reads from not-yet-written output (zeros on N64).
+         * On 64-bit Linux, simulate by reading zeros for these cases. */
+        s32 rawByte = (s32)(s8)compDat[uVar6];
+        s32 newOff = (iVar7 + -3) * 0x100 + rawByte;
+        if (newOff == -1) {
+          uVar6++;
+          *outSize = iVar9;
+          if (uVar6 == CompSize) errOut = 0;
+          else { errOut = -0xc9; if (uVar6 < CompSize) errOut = -0xcd; }
+          return errOut;
         }
-        else {
-          errOut = -0xc9;
-          if (uVar6 < CompSize) {
-            errOut = -0xcd;
-          }
-        }
-        return errOut;
+        iVar7 = newOff;
       }
-      uVar8 = iVar7 + 1;
-      if (iter <= 5) {
-        fprintf(stderr, "[lzb] new offset: iVar7=%d uVar8=%u in=%u out=%d\n",
-                iVar7, uVar8, uVar6, iVar9);
+      uVar6++;
+      if (iVar7 < 0) {
+        /* Negative offset: on N64 32-bit, this wraps to a forward reference
+         * reading zeros from uninitialized output. Simulate by setting
+         * uVar8 to a "forward" distance that reads zeros. */
+        uVar8 = 0; /* will be caught by zero-distance check → use zeros */
+      } else {
+        uVar8 = iVar7 + 1;
       }
     }
     uVar5 <<= 1;
@@ -146,19 +162,38 @@ LAB_800aa478:
 LAB_800aa598:
       iVar7+=2;
     }
-    iVar7+= (uVar8 < 0xd01 ^ 1);
-    pbVar1 = OutDat - uVar8;
-    iVar9++;
-    *OutDat = *pbVar1;
-    OutDat++;
-    do {
-      pbVar1++;
+    iVar7 += !(uVar8 < 0xd01);
+    if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
+    /* Copy bytes from back-reference.
+     * On N64 (32-bit), negative offsets wrap to forward references
+     * reading zeros from uninitialized RDRAM. On 64-bit Linux, we must
+     * handle: pre-output refs (before buffer), forward refs (negative
+     * offset wrapped on 32-bit), and normal back-references. */
+    {
+      u32 bytesWritten = (u32)(OutDat - OutDatStart);
+      bool validDist = (uVar8 > 0 && uVar8 <= bytesWritten);
+      pbVar1 = validDist ? (OutDat - uVar8) : OutDat; /* forward ref → read from current pos */
       iVar9++;
-      iVar7--;
-      *OutDat = *pbVar1;
+      *OutDat = validDist ? *pbVar1 : 0;
       OutDat++;
-    } while (iVar7 != 0);
-  } while( true );
+      do {
+        if (iVar9 >= (s32)maxOut) break;
+        pbVar1++;
+        iVar9++;
+        iVar7--;
+        /* For valid back-refs, read sequentially. For invalid, output 0. */
+        if (validDist && pbVar1 < OutDat) {
+          *OutDat = *pbVar1;
+        } else {
+          *OutDat = 0;
+        }
+        OutDat++;
+      } while (iVar7 != 0);
+    }
+  } while (iVar9 < (s32)maxOut);
+LZB_DONE:
+  *outSize = iVar9;
+  return 0;
 #undef LZB_CHECK_IN
 }
 
@@ -272,7 +307,7 @@ LAB_800aa690:
         } while ((uVar4 >> 0x10 & 1) == 0);
         iVar7+= 2;
       }
-      iVar7+= (uVar8 < 0xd01 ^ 1);
+      iVar7 += !(uVar8 < 0xd01);
       pbVar2 = param_3 - uVar8;
       iVar10++;
       *param_3 = *pbVar2;
@@ -466,7 +501,7 @@ LAB_800aaa0c:
 LAB_800aab98:
         iVar13 = iVar13 + 2;
       }
-      iVar13 = iVar13 + (uVar14 < 0xd01 ^ 1);
+      iVar13 += !(uVar14 < 0xd01);
       pbVar8 = param_3 - uVar14;
       iVar16 = iVar16 + 1;
       *param_3 = *pbVar8;

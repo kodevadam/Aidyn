@@ -38,6 +38,10 @@ void ProcessFreeQueue(QueueStructA *param_1){
       for(u16 i=0;i<FREEQUEUE_QUEUESIZE;i++) {
         entry = &param_1->array[i];
         if (entry->pri == 0) {
+          /* Guard: BorgPointer can be NULL if the asset failed to load */
+          if (!entry->BorgPointer && entry->BorgSwitch != QueueType_Other) {
+            continue;
+          }
           switch(entry->BorgSwitch) {
           case QueueType_Borg7:
             FUN_8009fca8((Borg7Header *)entry->BorgPointer);

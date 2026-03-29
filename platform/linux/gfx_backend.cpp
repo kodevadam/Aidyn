@@ -231,188 +231,683 @@ bool PollEvents() {
 }
 
 /* =========================================================================
+ * RSP/RDP state — tracks N64 graphics state for OpenGL translation
+ * ========================================================================= */
+static struct {
+    /* Fill / prim / env / fog colors (packed RGBA8888) */
+    u32 fillColor;
+    u32 fogColor;
+    u32 blendColor;
+    u32 primColor;
+    u32 envColor;
+
+    /* Scissor (in screen pixels, not N64 fixed-point) */
+    int scissorX, scissorY, scissorW, scissorH;
+
+    /* Geometry mode flags */
+    u32 geometryMode;
+
+    /* Cycle type (G_CYC_*) */
+    u32 cycleType;
+
+    /* N64 vertex buffer: RSP can hold 32 vertices for F3DEX2 */
+    struct Vertex {
+        float x, y, z, w;       /* position (after model-view transform on N64) */
+        float u, v;             /* texture coords */
+        u8 r, g, b, a;         /* vertex color */
+    } vtxBuf[64];
+
+    /* Matrix stack (simplified: just model-view and projection) */
+    float modelview[4][4];
+    float projection[4][4];
+    float mvpStack[16][4][4];
+    int mvpDepth;
+
+    /* Texture state */
+    struct {
+        uintptr_t imgAddr;   /* from G_SETTIMG: pointer to texture data */
+        u32 imgFmt;          /* G_IM_FMT_RGBA, _CI, _IA, _I */
+        u32 imgSiz;          /* G_IM_SIZ_4b, _8b, _16b, _32b */
+        u32 imgWidth;        /* width in pixels */
+    } tex;
+
+    uintptr_t tlutAddr;      /* palette address from G_LOADTLUT */
+    u32 texType;             /* texture lookup type (G_TT_NONE, G_TT_RGBA16) */
+
+    struct TileState {
+        u32 fmt, siz, line, tmem;
+        u32 uls, ult, lrs, lrt;  /* tile size in 10.2 FP */
+    } tiles[8];
+} sRSP;
+
+/* Forward declarations for helpers used by texture converters */
+static bool ptr_in_pool(uintptr_t addr);
+static void unpack_rgba(u32 c, float *r, float *g, float *b, float *a);
+
+/* Reusable GL texture for TEXRECT blits */
+static GLuint sTexRectTex = 0;
+
+/* Convert N64 RGBA5551 (big-endian) to RGBA8888 */
+static void rgba16_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u16 px = (u16)(src[i*2] << 8) | src[i*2+1]; /* big-endian read */
+        dst[i*4+0] = ((px >> 11) & 0x1F) * 255 / 31;
+        dst[i*4+1] = ((px >>  6) & 0x1F) * 255 / 31;
+        dst[i*4+2] = ((px >>  1) & 0x1F) * 255 / 31;
+        dst[i*4+3] = (px & 1) ? 255 : 0;
+    }
+}
+
+/* Convert N64 IA8 (4-bit I, 4-bit A) to RGBA8888 */
+static void ia8_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 intensity = (src[i] >> 4) * 255 / 15;
+        u8 alpha     = (src[i] & 0xF) * 255 / 15;
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = alpha;
+    }
+}
+
+/* Convert N64 I8 (8-bit intensity) to RGBA8888 */
+static void i8_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        dst[i*4+0] = src[i];
+        dst[i*4+1] = src[i];
+        dst[i*4+2] = src[i];
+        dst[i*4+3] = 255;
+    }
+}
+
+/* Convert N64 IA4 (3-bit I, 1-bit A) to RGBA8888 */
+static void ia4_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 byte = src[i / 2];
+        u8 nib = (i & 1) ? (byte & 0xF) : (byte >> 4);
+        u8 intensity = (nib >> 1) * 255 / 7;
+        u8 alpha = (nib & 1) ? 255 : 0;
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = alpha;
+    }
+}
+
+/* Convert N64 I4 (4-bit intensity) to RGBA8888 */
+static void i4_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 byte = src[i / 2];
+        u8 nib = (i & 1) ? (byte & 0xF) : (byte >> 4);
+        u8 intensity = nib * 255 / 15;
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = 255;
+    }
+}
+
+/* Convert N64 CI8 (8-bit palette index) to RGBA8888 using RGBA16 palette */
+static void ci8_to_rgba8(const u8 *src, u8 *dst, int numPixels, uintptr_t palAddr) {
+    const u8 *pal = (const u8 *)palAddr;
+    for (int i = 0; i < numPixels; i++) {
+        u8 idx = src[i];
+        if (pal && ptr_in_pool((uintptr_t)pal)) {
+            u16 px = (u16)(pal[idx*2] << 8) | pal[idx*2+1];
+            dst[i*4+0] = ((px >> 11) & 0x1F) * 255 / 31;
+            dst[i*4+1] = ((px >>  6) & 0x1F) * 255 / 31;
+            dst[i*4+2] = ((px >>  1) & 0x1F) * 255 / 31;
+            dst[i*4+3] = (px & 1) ? 255 : 0;
+        } else {
+            dst[i*4+0] = idx; dst[i*4+1] = idx;
+            dst[i*4+2] = idx; dst[i*4+3] = 255;
+        }
+    }
+}
+
+/* Convert N64 CI4 (4-bit palette index) to RGBA8888 using RGBA16 palette */
+static void ci4_to_rgba8(const u8 *src, u8 *dst, int numPixels, uintptr_t palAddr) {
+    const u8 *pal = (const u8 *)palAddr;
+    for (int i = 0; i < numPixels; i++) {
+        u8 byte = src[i / 2];
+        u8 idx = (i & 1) ? (byte & 0xF) : (byte >> 4);
+        if (pal && ptr_in_pool((uintptr_t)pal)) {
+            u16 px = (u16)(pal[idx*2] << 8) | pal[idx*2+1];
+            dst[i*4+0] = ((px >> 11) & 0x1F) * 255 / 31;
+            dst[i*4+1] = ((px >>  6) & 0x1F) * 255 / 31;
+            dst[i*4+2] = ((px >>  1) & 0x1F) * 255 / 31;
+            dst[i*4+3] = (px & 1) ? 255 : 0;
+        } else {
+            dst[i*4+0] = idx*17; dst[i*4+1] = idx*17;
+            dst[i*4+2] = idx*17; dst[i*4+3] = 255;
+        }
+    }
+}
+
+/* Convert N64 RGBA32 (big-endian) to RGBA8888 */
+static void rgba32_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        dst[i*4+0] = src[i*4+0];
+        dst[i*4+1] = src[i*4+1];
+        dst[i*4+2] = src[i*4+2];
+        dst[i*4+3] = src[i*4+3];
+    }
+}
+
+/* Convert N64 IA16 (8-bit I, 8-bit A) to RGBA8888 */
+static void ia16_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 intensity = src[i*2];
+        u8 alpha     = src[i*2+1];
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = alpha;
+    }
+}
+
+/* Draw a textured 2D rectangle using OpenGL */
+static void gl_tex_rect(int xl, int yl, int xh, int yh,
+                         const u8 *texData, int texW, int texH,
+                         float s0, float t0, float s1, float t1) {
+    if (!sTexRectTex) glGenTextures(1, &sTexRectTex);
+    glBindTexture(GL_TEXTURE_2D, sTexRectTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texW, texH, 0, GL_RGBA, GL_UNSIGNED_BYTE, texData);
+
+    /* Map N64 screen coords (320×240) to GL NDC (-1..1) */
+    float nx0 = (xl / 320.0f) * 2.0f - 1.0f;
+    float ny0 = 1.0f - (yl / 240.0f) * 2.0f;
+    float nx1 = (xh / 320.0f) * 2.0f - 1.0f;
+    float ny1 = 1.0f - (yh / 240.0f) * 2.0f;
+
+    /* Apply prim color modulation */
+    float pr, pg, pb, pa;
+    unpack_rgba(sRSP.primColor, &pr, &pg, &pb, &pa);
+
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor4f(pr, pg, pb, pa);
+    glBegin(GL_QUADS);
+    glTexCoord2f(s0, t0); glVertex2f(nx0, ny0);
+    glTexCoord2f(s1, t0); glVertex2f(nx1, ny0);
+    glTexCoord2f(s1, t1); glVertex2f(nx1, ny1);
+    glTexCoord2f(s0, t1); glVertex2f(nx0, ny1);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+}
+
+/* =========================================================================
+ * Shared helpers (used by both texture converters and DL processing)
+ * ========================================================================= */
+static bool ptr_in_pool(uintptr_t addr) {
+    return addr >= 0x40000000 && addr < 0x50000000;
+}
+
+/* Unpack RGBA8888 colour word to floats */
+static void unpack_rgba(u32 c, float *r, float *g, float *b, float *a) {
+    *r = ((c >> 24) & 0xFF) / 255.0f;
+    *g = ((c >> 16) & 0xFF) / 255.0f;
+    *b = ((c >>  8) & 0xFF) / 255.0f;
+    *a = ((c >>  0) & 0xFF) / 255.0f;
+}
+
+/* =========================================================================
  * Display list processing
  *
- * GBI command opcodes (upper byte of Gfx.w.hi).  Only the opcodes actually
- * used by F3DEX2 are listed.  The full set is ~50 commands.
+ * F3DEX2 opcode constants are defined in ultra64.h (G_VTX, G_DL, etc.).
+ * The walker reads the opcode from the top byte of each Gfx word and
+ * dispatches to the appropriate handler.
  * ========================================================================= */
-/* GBI opcode enum – use GBI_ prefix to avoid collisions with ultra64.h macros */
-enum GbiCmd : u8 {
-    GBI_SPNOOP        = 0x00,
-    GBI_MTX           = 0x01,
-    GBI_MOVEMEM       = 0x03,
-    GBI_VTX           = 0x04,
-    GBI_DL            = 0x06,
-    GBI_ENDDL         = 0xB8,
-    GBI_CULLDL        = 0xBE,
-    GBI_MOVEWORD      = 0xBC,
-    GBI_TEXTURE       = 0xBB,
-    GBI_POPMTX        = 0xBA,
-    GBI_GEOMETRYMODE  = 0xB9,
-    GBI_TRI1          = 0xBF,
-    GBI_TRI2          = 0xB1,
-    GBI_QUAD          = 0xB5,
-    GBI_RDPPIPESYNC   = 0xE7,
-    GBI_RDPFULLSYNC   = 0xE9,
-    GBI_SETSCISSOR    = 0xED,
-    GBI_SETOTHERMODE_L= 0xE2,
-    GBI_SETOTHERMODE_H= 0xE3,
-    GBI_TEXRECT       = 0xE4,
-    GBI_TEXRECTFLIP   = 0xE5,
-    GBI_RDPLOADSYNC   = 0xE6,
-    GBI_RDPTILESYNC   = 0xE8,
-    GBI_LOADBLOCK     = 0xF3,
-    GBI_LOADTLUT      = 0xF0,
-    GBI_SETTILESIZE   = 0xF2,
-    GBI_LOADTILE      = 0xF4,
-    GBI_SETTILE       = 0xF5,
-    GBI_FILLRECT      = 0xF6,
-    GBI_SETFILLCOLOR  = 0xF7,
-    GBI_SETFOGCOLOR   = 0xF8,
-    GBI_SETBLENDCOLOR = 0xF9,
-    GBI_SETPRIMCOLOR  = 0xFA,
-    GBI_SETENVCOLOR   = 0xFB,
-    GBI_SETCOMBINE    = 0xFC,
-    GBI_SETTIMG       = 0xFD,
-    GBI_SETZIMG       = 0xFE,
-    GBI_SETCIMG       = 0xFF,
-};
+static unsigned sDLStats[256] = {};
+static unsigned sDLFrameCount = 0;
 
-/*
- * SubmitFrame – translate a display list to OpenGL calls.
- *
- * This is currently a "log and skip" skeleton.  Each command is detected and
- * ignored with a comment indicating where real GL code should go.  Fill these
- * in incrementally as the port matures.
- */
+/* Draw a filled 2D rectangle using immediate-mode GL (no shaders needed) */
+static void gl_fill_rect(int x0, int y0, int x1, int y1, u32 color) {
+    float r, g, b, a;
+    unpack_rgba(color, &r, &g, &b, &a);
+
+    /* Map N64 screen coords (320×240) to GL NDC (-1..1) */
+    float nx0 = (x0 / 320.0f) * 2.0f - 1.0f;
+    float ny0 = 1.0f - (y0 / 240.0f) * 2.0f;
+    float nx1 = (x1 / 320.0f) * 2.0f - 1.0f;
+    float ny1 = 1.0f - (y1 / 240.0f) * 2.0f;
+
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor4f(r, g, b, a);
+    glBegin(GL_QUADS);
+    glVertex2f(nx0, ny0);
+    glVertex2f(nx1, ny0);
+    glVertex2f(nx1, ny1);
+    glVertex2f(nx0, ny1);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+}
+
+/* Load N64 vertex data into the RSP vertex buffer */
+static void load_vertices(uintptr_t addr, int numVerts, int startIdx) {
+    if (!ptr_in_pool(addr)) return;
+    if (startIdx + numVerts > 64) numVerts = 64 - startIdx;
+
+    /* N64 Vtx format: 16 bytes per vertex
+     * s16 x, y, z; u16 flag; s16 u, v; u8 r, g, b, a (or nx, ny, nz, a) */
+    const u8 *src = reinterpret_cast<const u8 *>(addr);
+    for (int i = 0; i < numVerts; i++) {
+        auto &v = sRSP.vtxBuf[startIdx + i];
+        /* N64 is big-endian; data was byte-swapped on load */
+        const u8 *p = src + i * 16;
+        s16 px = (s16)((p[0] << 8) | p[1]);
+        s16 py = (s16)((p[2] << 8) | p[3]);
+        s16 pz = (s16)((p[4] << 8) | p[5]);
+        /* p[6..7] = flag */
+        s16 pu = (s16)((p[8] << 8) | p[9]);
+        s16 pv = (s16)((p[10] << 8) | p[11]);
+        v.x = (float)px;
+        v.y = (float)py;
+        v.z = (float)pz;
+        v.w = 1.0f;
+        v.u = (float)pu / 32.0f;   /* 5.10 fixed point */
+        v.v = (float)pv / 32.0f;
+        v.r = p[12];
+        v.g = p[13];
+        v.b = p[14];
+        v.a = p[15];
+    }
+}
+
+/* Draw a triangle from the vertex buffer (vertex-colored, no textures) */
+static void draw_tri(int v0, int v1, int v2) {
+    auto &a = sRSP.vtxBuf[v0];
+    auto &b = sRSP.vtxBuf[v1];
+    auto &c = sRSP.vtxBuf[v2];
+
+    /* Simple orthographic projection for now: scale x/y to NDC */
+    auto emit = [](const decltype(sRSP.vtxBuf[0]) &vtx) {
+        glColor4ub(vtx.r, vtx.g, vtx.b, vtx.a);
+        /* Scale vertex positions: N64 screen coords are roughly -320..320, -240..240 */
+        glVertex3f(vtx.x / 320.0f, vtx.y / 240.0f, vtx.z / 65536.0f);
+    };
+
+    glBegin(GL_TRIANGLES);
+    emit(a); emit(b); emit(c);
+    glEnd();
+}
+
 static void process_display_list(const Gfx *dl, int depth = 0) {
-    if (!dl || depth > 16) return; /* guard against infinite recursion */
+    if (!dl || depth > 16) return;
+    if (!ptr_in_pool((uintptr_t)dl)) {
+        fprintf(stderr, "[gfx] DL ptr %p outside pool, skipping\n", (void*)dl);
+        return;
+    }
 
-    for (;;) {
+    { static int dlStartLog = 0;
+      if (dlStartLog < 6 && depth == 0) {
+        fprintf(stderr, "[gfx] process_display_list START: dl=%p depth=%d\n", (void*)dl, depth);
+        dlStartLog++;
+      }
+    }
+
+    int maxCmds = 10000;
+    int cmdCount = 0;
+    for (; maxCmds > 0; maxCmds--) {
         u8 cmd = (u8)(dl->w.hi >> 24);
+        sDLStats[cmd]++;
+        cmdCount++;
 
-        switch ((GbiCmd)cmd) {
-        case GBI_SPNOOP:
-        case GBI_RDPPIPESYNC:
-        case GBI_RDPFULLSYNC:
-        case GBI_RDPLOADSYNC:
-        case GBI_RDPTILESYNC:
-            /* sync / noop – nothing to do */
+        switch (cmd) {
+        case G_SPNOOP:
+        case G_RDPPIPESYNC:
+        case G_RDPFULLSYNC:
+        case G_RDPLOADSYNC:
+        case G_RDPTILESYNC:
             break;
 
-        case GBI_ENDDL:
-            return; /* end of display list */
+        case G_ENDDL:
+            { static int dlEndLog = 0;
+              if (dlEndLog < 6 && depth == 0) {
+                fprintf(stderr, "[gfx] process_display_list END: dl_end=%p cmdCount=%d\n", (void*)dl, cmdCount);
+                dlEndLog++;
+              }
+            }
+            return;
 
-        case GBI_DL: {
-            /* Call sub-display list */
-            uintptr_t addr = (uintptr_t)dl->w.lo;
-            const Gfx *subdl = reinterpret_cast<const Gfx *>(addr);
-            bool branch = (dl->w.hi >> 16) & 0xFF; /* 1 = branch (replace), 0 = call */
-            process_display_list(subdl, depth + 1);
-            if (branch) return;
-            break;
-        }
-
-        case GBI_MTX:
-            /* TODO: push/load/multiply matrix onto GL matrix stack */
-            break;
-
-        case GBI_POPMTX:
-            /* TODO: pop matrix stack */
-            break;
-
-        case GBI_GEOMETRYMODE:
-            /* TODO: map N64 geometry mode flags to glEnable/glDisable */
-            break;
-
-        case GBI_VTX:
-            /* TODO: upload vertex data to a vertex buffer */
-            break;
-
-        case GBI_TRI1:
-        case GBI_TRI2:
-        case GBI_QUAD:
-            /* TODO: draw triangles from the loaded vertex buffer */
-            break;
-
-        case GBI_TEXTURE:
-            /* TODO: set texture scale / enable */
-            break;
-
-        case GBI_SETTIMG:
-            /* TODO: set the source texture image pointer */
-            break;
-
-        case GBI_SETTILE:
-            /* TODO: configure tile descriptor */
-            break;
-
-        case GBI_LOADBLOCK:
-        case GBI_LOADTILE:
-            /* TODO: upload texture data to GL */
-            break;
-
-        case GBI_SETTILESIZE:
-            /* TODO: set tile UV extents */
-            break;
-
-        case GBI_LOADTLUT:
-            /* TODO: load colour palette */
-            break;
-
-        case GBI_SETCOMBINE:
-            /* TODO: translate N64 combiner to GLSL shader */
-            break;
-
-        case GBI_SETOTHERMODE_L:
-        case GBI_SETOTHERMODE_H:
-            /* TODO: map render / blend modes */
-            break;
-
-        case GBI_SETSCISSOR:
-            /* TODO: glScissor */
-            break;
-
-        case GBI_FILLRECT: {
-            /* Draw a filled rectangle – used for clears / UI boxes.
-             * Extract coords from the command word:
-             *   hi[23:12] = XH, hi[11:0] = YH  (right/bottom, 2-frac bits)
-             *   lo[23:12] = XL, lo[11:0] = YL  (left/top)
-             */
-            /* TODO: implement with a fullscreen-quad shader */
+        case G_DL: {
+            uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
+            if (ptr_in_pool(addr)) {
+                const Gfx *subdl = reinterpret_cast<const Gfx *>(addr);
+                bool branch = (dl->w.hi >> 16) & 0x01;
+                process_display_list(subdl, depth + 1);
+                if (branch) return;
+            }
             break;
         }
 
-        case GBI_SETFILLCOLOR:
-            /* TODO: store fill colour for subsequent G_FILLRECT */
+        case G_MTX:
+            /* Store matrix pointer for future use; full transform chain TBD */
             break;
 
-        case GBI_SETFOGCOLOR:
-            /* TODO: glFog equivalent */
+        case G_POPMTX:
             break;
 
-        case GBI_SETBLENDCOLOR:
-        case GBI_SETENVCOLOR:
-        case GBI_SETPRIMCOLOR:
-            /* TODO: pass colour to shader uniforms */
+        case G_GEOMETRYMODE: {
+            u32 clearBits = dl->w.hi & 0x00FFFFFF;
+            u32 setBits   = dl->w.lo;
+            sRSP.geometryMode = (sRSP.geometryMode & clearBits) | setBits;
+            break;
+        }
+
+        case G_VTX: {
+            int numVerts = (dl->w.hi >> 12) & 0xFF;
+            int startIdx = ((dl->w.hi >> 1) & 0x7F) - numVerts;
+            if (startIdx < 0) startIdx = 0;
+            uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
+            load_vertices(addr, numVerts, startIdx);
+            break;
+        }
+
+        case G_TRI1: {
+            int v0 = ((dl->w.hi >> 16) & 0xFF) / 2;
+            int v1 = ((dl->w.hi >>  8) & 0xFF) / 2;
+            int v2 = ((dl->w.hi >>  0) & 0xFF) / 2;
+            draw_tri(v0, v1, v2);
+            break;
+        }
+
+        case G_TRI2: {
+            int v0 = ((dl->w.hi >> 16) & 0xFF) / 2;
+            int v1 = ((dl->w.hi >>  8) & 0xFF) / 2;
+            int v2 = ((dl->w.hi >>  0) & 0xFF) / 2;
+            int v3 = ((dl->w.lo >> 16) & 0xFF) / 2;
+            int v4 = ((dl->w.lo >>  8) & 0xFF) / 2;
+            int v5 = ((dl->w.lo >>  0) & 0xFF) / 2;
+            draw_tri(v0, v1, v2);
+            draw_tri(v3, v4, v5);
+            break;
+        }
+
+        case G_QUAD: {
+            int v0 = ((dl->w.hi >> 16) & 0xFF) / 2;
+            int v1 = ((dl->w.hi >>  8) & 0xFF) / 2;
+            int v2 = ((dl->w.hi >>  0) & 0xFF) / 2;
+            draw_tri(v0, v1, v2);
+            break;
+        }
+
+        case G_TEXTURE_CMD:
+            /* Texture scale/enable — tracked for future texture support */
             break;
 
-        case GBI_TEXRECT:
-        case GBI_TEXRECTFLIP:
-            /* TODO: textured rectangle (2D sprite blit) */
+        case G_SETTIMG: {
+            sRSP.tex.imgFmt   = (dl->w.hi >> 21) & 0x07;
+            sRSP.tex.imgSiz   = (dl->w.hi >> 19) & 0x03;
+            sRSP.tex.imgWidth = (dl->w.hi & 0xFFF) + 1;
+            sRSP.tex.imgAddr  = (uintptr_t)(u32)dl->w.lo;
+            {
+                static int sSettimgLog = 0;
+                if (sSettimgLog < 200 || (u32)dl->w.lo != 0) {
+                    fprintf(stderr, "[gfx] SETTIMG: addr=0x%08x fmt=%u siz=%u w=%u pool=%d\n",
+                            (u32)dl->w.lo, sRSP.tex.imgFmt, sRSP.tex.imgSiz,
+                            sRSP.tex.imgWidth, ptr_in_pool(sRSP.tex.imgAddr));
+                    fflush(stderr);
+                    if ((u32)dl->w.lo == 0) sSettimgLog++;
+                }
+            }
+            break;
+        }
+
+        case G_SETTILE: {
+            u32 tile = (dl->w.lo >> 24) & 0x07;
+            sRSP.tiles[tile].fmt  = (dl->w.hi >> 21) & 0x07;
+            sRSP.tiles[tile].siz  = (dl->w.hi >> 19) & 0x03;
+            sRSP.tiles[tile].line = (dl->w.hi >> 9) & 0x1FF;
+            sRSP.tiles[tile].tmem = dl->w.hi & 0x1FF;
+            break;
+        }
+
+        case G_LOADBLOCK:
+        case G_LOADTILE:
+            /* Texture data loading — the actual pixel data is read from
+             * sRSP.tex.imgAddr when G_TEXRECT is processed. */
             break;
 
-        case GBI_CULLDL:
-            /* TODO: frustum cull check */
+        case G_SETTILESIZE: {
+            u32 tile = (dl->w.lo >> 24) & 0x07;
+            sRSP.tiles[tile].uls = (dl->w.hi >> 12) & 0xFFF;
+            sRSP.tiles[tile].ult = (dl->w.hi >>  0) & 0xFFF;
+            sRSP.tiles[tile].lrs = (dl->w.lo >> 12) & 0xFFF;
+            sRSP.tiles[tile].lrt = (dl->w.lo >>  0) & 0xFFF;
+            break;
+        }
+
+        case G_LOADTLUT: {
+            /* Palette address stored in lo word by our fixed macro */
+            uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
+            if (ptr_in_pool(addr))
+                sRSP.tlutAddr = addr;
+            break;
+        }
+
+        case G_SETCOMBINE:
+            /* Combiner mode — stub until shader-based rendering */
             break;
 
-        case GBI_MOVEMEM:
-        case GBI_MOVEWORD:
-            /* TODO: move data into RSP DMEM – map to appropriate state */
+        case G_SETOTHERMODE_L:
+        case G_SETOTHERMODE_H: {
+            /* Track cycle type for fill rect handling */
+            u32 shift = (dl->w.hi >> 8) & 0xFF;
+            if (cmd == G_SETOTHERMODE_H && shift == 20) {
+                sRSP.cycleType = (dl->w.lo >> 20) & 0x03;
+            }
+            break;
+        }
+
+        case G_SETSCISSOR_CMD: {
+            int x0 = (dl->w.hi >> 12) & 0xFFF;
+            int y0 = (dl->w.hi >>  0) & 0xFFF;
+            int x1 = (dl->w.lo >> 12) & 0xFFF;
+            int y1 = (dl->w.lo >>  0) & 0xFFF;
+            /* Fixed-point 10.2 → integer pixels */
+            x0 >>= 2; y0 >>= 2; x1 >>= 2; y1 >>= 2;
+            sRSP.scissorX = x0;
+            sRSP.scissorY = y0;
+            sRSP.scissorW = x1 - x0;
+            sRSP.scissorH = y1 - y0;
+            /* Map to actual window coords */
+            float sx = (float)sWidth / 320.0f;
+            float sy = (float)sHeight / 240.0f;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor((int)(x0 * sx), (int)((240 - y1) * sy),
+                      (int)((x1 - x0) * sx), (int)((y1 - y0) * sy));
+            break;
+        }
+
+        case G_FILLRECT: {
+            /* Extract coords: hi has xh/yh (right/bottom), lo has xl/yl (left/top) */
+            int xh = (dl->w.hi >> 14) & 0x3FF;
+            int yh = (dl->w.hi >>  2) & 0x3FF;
+            int xl = (dl->w.lo >> 14) & 0x3FF;
+            int yl = (dl->w.lo >>  2) & 0x3FF;
+            /* In fill mode, the fill color is used directly */
+            gl_fill_rect(xl, yl, xh + 1, yh + 1, sRSP.fillColor);
+            break;
+        }
+
+        case G_SETFILLCOLOR:
+            sRSP.fillColor = dl->w.lo;
+            break;
+
+        case G_SETFOGCOLOR:
+            sRSP.fogColor = dl->w.lo;
+            break;
+
+        case G_SETBLENDCOLOR:
+            sRSP.blendColor = dl->w.lo;
+            break;
+
+        case G_SETPRIMCOLOR:
+            sRSP.primColor = dl->w.lo;
+            break;
+
+        case G_SETENVCOLOR:
+            sRSP.envColor = dl->w.lo;
+            break;
+
+        case G_TEXRECT:
+        case G_TEXRECTFLIP: {
+            /* Single-entry TEXRECT (Linux simplified encoding):
+             * hi: G_TEXRECT | xh[11:0]<<12 | yh[11:0]
+             * lo: tile<<24 | xl[11:0]<<12 | yl[11:0] */
+            int xh = (dl->w.hi >> 12) & 0xFFF;
+            int yh = (dl->w.hi >>  0) & 0xFFF;
+            /* u32 tile = (dl->w.lo >> 24) & 0x07; */
+            int xl = (dl->w.lo >> 12) & 0xFFF;
+            int yl = (dl->w.lo >>  0) & 0xFFF;
+
+            /* Convert 10.2 fixed point to integer pixels */
+            float fxl = xl / 4.0f, fyl = yl / 4.0f;
+            float fxh = xh / 4.0f, fyh = yh / 4.0f;
+            int texW = (int)(fxh - fxl);
+            int texH = (int)(fyh - fyl);
+
+            static int sTexRectLog = 0;
+            if (sTexRectLog < 100) {
+                fprintf(stderr, "[gfx] TEXRECT: xl=%.1f yl=%.1f xh=%.1f yh=%.1f w=%d h=%d "
+                        "imgAddr=0x%lx fmt=%u siz=%u imgW=%u prim=0x%08x\n",
+                        fxl, fyl, fxh, fyh, texW, texH,
+                        (unsigned long)sRSP.tex.imgAddr, sRSP.tex.imgFmt, sRSP.tex.imgSiz,
+                        sRSP.tex.imgWidth, sRSP.primColor);
+                fflush(stderr);
+                sTexRectLog++;
+            }
+
+            if (texW <= 0 || texH <= 0) break;
+            if (texW > 1024 || texH > 1024) break;
+
+            /* Read texture data from the image address set by G_SETTIMG */
+            uintptr_t imgAddr = sRSP.tex.imgAddr;
+            if (!ptr_in_pool(imgAddr)) {
+                if (sTexRectLog <= 33) {
+                    fprintf(stderr, "[gfx] TEXRECT: imgAddr 0x%lx NOT in pool, skipping\n",
+                            (unsigned long)imgAddr);
+                    sTexRectLog++;
+                }
+                break;
+            }
+
+            /* Determine bytes per pixel from image size format */
+            int bpp = 0;
+            switch (sRSP.tex.imgSiz) {
+                case 0: bpp = 0; break; /* 4b — handled specially */
+                case 1: bpp = 1; break; /* 8b */
+                case 2: bpp = 2; break; /* 16b */
+                case 3: bpp = 4; break; /* 32b */
+            }
+
+            /* Use the image width from G_SETTIMG for stride, texW for rect width */
+            int srcW = (int)sRSP.tex.imgWidth;
+            if (srcW <= 0) srcW = texW;
+
+            /* Convert N64 texture data to RGBA8888 */
+            int numPixels = texW * texH;
+            u8 *rgba = (u8 *)calloc(numPixels * 4, 1);
+            if (!rgba) break;
+
+            const u8 *src = (const u8 *)imgAddr;
+            u32 fmt = sRSP.tex.imgFmt;
+            u32 siz = sRSP.tex.imgSiz;
+
+            /* Convert row by row (source stride may differ from texW) */
+            for (int row = 0; row < texH; row++) {
+                const u8 *rowSrc;
+                u8 *rowDst = rgba + row * texW * 4;
+
+                if (bpp > 0)
+                    rowSrc = src + row * srcW * bpp;
+                else
+                    rowSrc = src + row * srcW / 2; /* 4-bit */
+
+                if (fmt == G_IM_FMT_RGBA && siz == G_IM_SIZ_16b)
+                    rgba16_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_RGBA && siz == G_IM_SIZ_32b)
+                    rgba32_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_IA && siz == G_IM_SIZ_16b)
+                    ia16_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_IA && siz == G_IM_SIZ_8b)
+                    ia8_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_IA && siz == G_IM_SIZ_4b)
+                    ia4_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_I && siz == G_IM_SIZ_8b)
+                    i8_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_I && siz == G_IM_SIZ_4b)
+                    i4_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_CI && siz == G_IM_SIZ_8b)
+                    ci8_to_rgba8(rowSrc, rowDst, texW, sRSP.tlutAddr);
+                else if (fmt == G_IM_FMT_CI && siz == G_IM_SIZ_4b)
+                    ci4_to_rgba8(rowSrc, rowDst, texW, sRSP.tlutAddr);
+                else {
+                    /* Unknown format — fill with magenta for debugging */
+                    for (int p = 0; p < texW; p++) {
+                        rowDst[p*4+0] = 255; rowDst[p*4+1] = 0;
+                        rowDst[p*4+2] = 255; rowDst[p*4+3] = 255;
+                    }
+                }
+            }
+
+            /* Simple UV mapping: full texture, no S/T offset */
+            gl_tex_rect((int)fxl, (int)fyl, (int)fxh, (int)fyh,
+                        rgba, texW, texH, 0.0f, 0.0f, 1.0f, 1.0f);
+            free(rgba);
+            break;
+        }
+
+        case G_CULLDL:
+        case G_BRANCH_Z:
+            break;
+
+        case G_MOVEMEM:
+        case G_MOVEWORD:
+            break;
+
+        case G_SETCIMG:
+        case G_SETZIMG:
+            break;
+
+        case G_SETPRIMDEPTH:
+        case G_MODIFYVTX:
             break;
 
         default:
-            /* Unknown command – ignore */
             break;
         }
 
@@ -449,17 +944,51 @@ void SubmitFrame(OSScTask *task) {
     if (!task) return;
 
     if (sSoftware) {
-        /* Software mode: just clear and present for now */
         SDL_SetRenderDrawColor(sRenderer, 0, 0, 0, 255);
         SDL_RenderClear(sRenderer);
         SDL_RenderPresent(sRenderer);
     } else {
+        /* Reset RSP state for this frame */
+        sRSP.fillColor = 0;
+        sRSP.fogColor = 0;
+        sRSP.blendColor = 0;
+        sRSP.primColor = 0xFFFFFFFF; /* default white/opaque */
+        sRSP.envColor = 0;
+        sRSP.geometryMode = 0;
+        sRSP.cycleType = 0;
+        sRSP.scissorX = 0;
+        sRSP.scissorY = 0;
+        sRSP.scissorW = sWidth;
+        sRSP.scissorH = sHeight;
+        sRSP.tex.imgAddr = 0;
+        sRSP.tex.imgFmt = 0;
+        sRSP.tex.imgSiz = 0;
+        sRSP.tex.imgWidth = 0;
+        sRSP.tlutAddr = 0;
+        sRSP.texType = 0;
+        memset(sRSP.tiles, 0, sizeof(sRSP.tiles));
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
 
         /* Walk the display list attached to the task */
         if (task->list.t.data_ptr) {
-            process_display_list((Gfx*)task->list.t.data_ptr);
+            Gfx *dlStart = (Gfx*)task->list.t.data_ptr;
+            process_display_list(dlStart);
         }
+
+        glDisable(GL_SCISSOR_TEST);
+
+        sDLFrameCount++;
+        if (sDLFrameCount <= 3 || (sDLFrameCount % 300 == 0)) {
+            fprintf(stderr, "[gfx] frame %u DL stats:", sDLFrameCount);
+            for (int i = 0; i < 256; i++) {
+                if (sDLStats[i] > 0)
+                    fprintf(stderr, " %02x:%u", i, sDLStats[i]);
+            }
+            fprintf(stderr, "\n");
+        }
+        memset(sDLStats, 0, sizeof(sDLStats));
 
         SDL_GL_SwapWindow(sWindow);
     }
