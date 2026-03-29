@@ -112,38 +112,44 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       HFREE(compressedDat,397);
       break;
     case Compress_LZB: {
-      /* LZB back-references can extend before the output buffer into a
-       * "dictionary" region.  On N64 this was zeroed RDRAM; on Linux the
-       * heap metadata differs, so we provide an explicit zero-filled prefix
-       * to match N64 behaviour.  128 KB covers the largest observed
-       * back-reference distances (~74 KB). */
+      /* LZB back-references can reach BEFORE the output buffer into a
+       * "history" region.  On N64, the heap allocator reuses memory, so
+       * pre-output bytes contain remnants of previous decompressions.
+       * We replicate this by using a PERSISTENT history buffer that
+       * retains data across calls, mimicking N64 heap reuse. */
       static constexpr u32 LZB_PREFIX = 128u * 1024;
-      static constexpr u32 LZB_SUFFIX = 64u * 1024; /* match copy can overshoot before loop check */
+      static constexpr u32 LZB_SUFFIX = 64u * 1024;
+      static u8 *sPersistentBuf = nullptr;
+      static u32 sPersistentSize = 0;
+      u32 totalNeeded = LZB_PREFIX + outSize + LZB_SUFFIX;
+      if (!sPersistentBuf || sPersistentSize < totalNeeded) {
+        /* Grow the buffer but DON'T free the old one — copy its contents
+         * to preserve the history (like N64 heap reuse). */
+        u8 *newBuf = (u8 *)malloc(totalNeeded);
+        if (!newBuf) { fprintf(stderr, "[borg] LZB malloc(%u) FAILED\n", totalNeeded); break; }
+        if (sPersistentBuf) {
+          /* Copy old history into new buffer's prefix region */
+          u32 copyLen = sPersistentSize < totalNeeded ? sPersistentSize : totalNeeded;
+          memcpy(newBuf, sPersistentBuf, copyLen);
+          free(sPersistentBuf);
+        } else {
+          memset(newBuf, 0, totalNeeded); /* first call: zero-init */
+        }
+        sPersistentBuf = newBuf;
+        sPersistentSize = totalNeeded;
+      }
+      /* Output goes at PREFIX offset — previous decompressions' data
+       * is still in the prefix region, serving as the LZB dictionary. */
       ALLOCS(compressedDat,compSize,407);
       if (!compressedDat) { fprintf(stderr, "[borg] LZB alloc(%u) FAILED\n", compSize); break; }
       ROMCOPYS(compressedDat,param_1,compSize,411);
-      u8 *tmpBuf = (u8 *)calloc(1, LZB_PREFIX + outSize + LZB_SUFFIX);
-      if (!tmpBuf) { fprintf(stderr, "[borg] LZB calloc(%u) FAILED\n", LZB_PREFIX + outSize + LZB_SUFFIX); HFREE(compressedDat,421); break; }
-      /* Dump compressed input for algorithm tracing */
-      {
-        u8 *c = compressedDat;
-        if (0) fprintf(stderr, "[lzb] compressed first 32 bytes: "
-                "%02x %02x %02x %02x %02x %02x %02x %02x "
-                "%02x %02x %02x %02x %02x %02x %02x %02x "
-                "%02x %02x %02x %02x %02x %02x %02x %02x "
-                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
-                c[0],c[1],c[2],c[3],c[4],c[5],c[6],c[7],
-                c[8],c[9],c[10],c[11],c[12],c[13],c[14],c[15],
-                c[16],c[17],c[18],c[19],c[20],c[21],c[22],c[23],
-                c[24],c[25],c[26],c[27],c[28],c[29],c[30],c[31]);
-      }
-      s32 lzbRet = decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      s32 lzbRet = decompress_LZB(compressedDat, compSize, sPersistentBuf + LZB_PREFIX, auStack40);
       if (lzbRet < 0 && lzbRet != -205) {
         /* -205 means "end marker found but didn't consume all input" — likely trailing
          * padding, treat as success.  Other negative codes are real failures. */
         fprintf(stderr, "[borg] LZB decompression FAILED (ret=%d), zeroing output\n", lzbRet);
         memset(borgfile, 0, outSize);
-        free(tmpBuf);
+        /* persistent buffer not freed */
         HFREE(compressedDat,421);
         return false;
       }
@@ -152,7 +158,7 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       }
       /* Check if LZB produced any non-zero output (all-zeros = silent failure) */
       {
-        u8 *out = tmpBuf + LZB_PREFIX;
+        u8 *out = sPersistentBuf + LZB_PREFIX;
         bool allZero = true;
         for (u32 i = 0; i < outSize && i < 64; i++) {
           if (out[i] != 0) { allZero = false; break; }
@@ -160,12 +166,22 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
         if (allZero && outSize > 0) {
           fprintf(stderr, "[borg] LZB produced all-zero output (%u bytes), treating as failure\n", outSize);
           memset(borgfile, 0, outSize);
-          free(tmpBuf);
+          /* persistent buffer not freed */
           HFREE(compressedDat,421);
           return false;
         }
       }
-      memcpy(borgfile, tmpBuf + LZB_PREFIX, outSize);
+      memcpy(borgfile, sPersistentBuf + LZB_PREFIX, outSize);
+      /* Shift the output data into the prefix region so it becomes the
+       * "history" for the next decompression (simulating heap reuse).
+       * Move the entire prefix+output left so the most recent output
+       * occupies the end of the prefix region. */
+      if (outSize < LZB_PREFIX) {
+        memmove(sPersistentBuf, sPersistentBuf + outSize, LZB_PREFIX);
+        memcpy(sPersistentBuf + LZB_PREFIX - outSize, borgfile, outSize);
+      } else {
+        memcpy(sPersistentBuf, borgfile + outSize - LZB_PREFIX, LZB_PREFIX);
+      }
       /* Dump first 32 bytes of decompressed output for format analysis */
       {
         u8 *out = borgfile;
@@ -174,7 +190,6 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
         for (u32 i = 0; i < n; i++) fprintf(stderr, " %02x", out[i]);
         fprintf(stderr, "\n");
       }
-      free(tmpBuf);
       HFREE(compressedDat,421);
     }
   }
