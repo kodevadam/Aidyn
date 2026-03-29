@@ -441,15 +441,23 @@ WidgetScrollMenu * IntroMenu::StartGameMenu() {
             gGlobals.CommonStrings[0xa0] ? gGlobals.CommonStrings[0xa0] : "(null)",
             gGlobals.CommonStrings[0xa1] ? gGlobals.CommonStrings[0xa1] : "(null)");
   }
+  /* Fallback: if CommonStrings are empty (ROM string decompression issue),
+   * use hardcoded English strings so the menu is at least visible. */
+  const char *strNewGame  = (gGlobals.CommonStrings && gGlobals.CommonStrings[0x9f] && gGlobals.CommonStrings[0x9f][0])
+                            ? gGlobals.CommonStrings[0x9f] : "New Game";
+  const char *strLoadGame = (gGlobals.CommonStrings && gGlobals.CommonStrings[0xa0] && gGlobals.CommonStrings[0xa0][0])
+                            ? gGlobals.CommonStrings[0xa0] : "Load Game";
+  const char *strOptions  = (gGlobals.CommonStrings && gGlobals.CommonStrings[0xa1] && gGlobals.CommonStrings[0xa1][0])
+                            ? gGlobals.CommonStrings[0xa1] : "Options";
   WidgetScrollMenu *scroll = new WidgetScrollMenu(7);
   WidgetBorg8 *title = WidgetB8(BORG8_TitleMenui);
   title->SetCoords(SCREEN_CENTERW - (title->GetWidth() >> 1),50);
   scroll->SetCoords(SCREEN_CENTERW,90);
   scroll->Link(title);
   scroll->StartButtonFunc = scroll->AButtonFunc;
-  scroll->Append(WText(gGlobals.CommonStrings[0x9f]));
-  scroll->Append(WText(gGlobals.CommonStrings[0xa0]));
-  scroll->Append(WText(gGlobals.CommonStrings[0xa1]));
+  scroll->Append(WText(strNewGame));
+  scroll->Append(WText(strLoadGame));
+  scroll->Append(WText(strOptions));
   #if DEBUGVER
   if (gDebugFlag) {
     scroll->Append(WText("Start Game"));
