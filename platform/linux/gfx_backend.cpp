@@ -262,18 +262,203 @@ static struct {
     float projection[4][4];
     float mvpStack[16][4][4];
     int mvpDepth;
+
+    /* Texture state */
+    struct {
+        uintptr_t imgAddr;   /* from G_SETTIMG: pointer to texture data */
+        u32 imgFmt;          /* G_IM_FMT_RGBA, _CI, _IA, _I */
+        u32 imgSiz;          /* G_IM_SIZ_4b, _8b, _16b, _32b */
+        u32 imgWidth;        /* width in pixels */
+    } tex;
+
+    uintptr_t tlutAddr;      /* palette address from G_LOADTLUT */
+    u32 texType;             /* texture lookup type (G_TT_NONE, G_TT_RGBA16) */
+
+    struct TileState {
+        u32 fmt, siz, line, tmem;
+        u32 uls, ult, lrs, lrt;  /* tile size in 10.2 FP */
+    } tiles[8];
 } sRSP;
 
-/* =========================================================================
- * Display list processing
- *
- * F3DEX2 opcode constants are defined in ultra64.h (G_VTX, G_DL, etc.).
- * The walker reads the opcode from the top byte of each Gfx word and
- * dispatches to the appropriate handler.
- * ========================================================================= */
-static unsigned sDLStats[256] = {};
-static unsigned sDLFrameCount = 0;
+/* Forward declarations for helpers used by texture converters */
+static bool ptr_in_pool(uintptr_t addr);
+static void unpack_rgba(u32 c, float *r, float *g, float *b, float *a);
 
+/* Reusable GL texture for TEXRECT blits */
+static GLuint sTexRectTex = 0;
+
+/* Convert N64 RGBA5551 (big-endian) to RGBA8888 */
+static void rgba16_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u16 px = (u16)(src[i*2] << 8) | src[i*2+1]; /* big-endian read */
+        dst[i*4+0] = ((px >> 11) & 0x1F) * 255 / 31;
+        dst[i*4+1] = ((px >>  6) & 0x1F) * 255 / 31;
+        dst[i*4+2] = ((px >>  1) & 0x1F) * 255 / 31;
+        dst[i*4+3] = (px & 1) ? 255 : 0;
+    }
+}
+
+/* Convert N64 IA8 (4-bit I, 4-bit A) to RGBA8888 */
+static void ia8_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 intensity = (src[i] >> 4) * 255 / 15;
+        u8 alpha     = (src[i] & 0xF) * 255 / 15;
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = alpha;
+    }
+}
+
+/* Convert N64 I8 (8-bit intensity) to RGBA8888 */
+static void i8_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        dst[i*4+0] = src[i];
+        dst[i*4+1] = src[i];
+        dst[i*4+2] = src[i];
+        dst[i*4+3] = 255;
+    }
+}
+
+/* Convert N64 IA4 (3-bit I, 1-bit A) to RGBA8888 */
+static void ia4_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 byte = src[i / 2];
+        u8 nib = (i & 1) ? (byte & 0xF) : (byte >> 4);
+        u8 intensity = (nib >> 1) * 255 / 7;
+        u8 alpha = (nib & 1) ? 255 : 0;
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = alpha;
+    }
+}
+
+/* Convert N64 I4 (4-bit intensity) to RGBA8888 */
+static void i4_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 byte = src[i / 2];
+        u8 nib = (i & 1) ? (byte & 0xF) : (byte >> 4);
+        u8 intensity = nib * 255 / 15;
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = 255;
+    }
+}
+
+/* Convert N64 CI8 (8-bit palette index) to RGBA8888 using RGBA16 palette */
+static void ci8_to_rgba8(const u8 *src, u8 *dst, int numPixels, uintptr_t palAddr) {
+    const u8 *pal = (const u8 *)palAddr;
+    for (int i = 0; i < numPixels; i++) {
+        u8 idx = src[i];
+        if (pal && ptr_in_pool((uintptr_t)pal)) {
+            u16 px = (u16)(pal[idx*2] << 8) | pal[idx*2+1];
+            dst[i*4+0] = ((px >> 11) & 0x1F) * 255 / 31;
+            dst[i*4+1] = ((px >>  6) & 0x1F) * 255 / 31;
+            dst[i*4+2] = ((px >>  1) & 0x1F) * 255 / 31;
+            dst[i*4+3] = (px & 1) ? 255 : 0;
+        } else {
+            dst[i*4+0] = idx; dst[i*4+1] = idx;
+            dst[i*4+2] = idx; dst[i*4+3] = 255;
+        }
+    }
+}
+
+/* Convert N64 CI4 (4-bit palette index) to RGBA8888 using RGBA16 palette */
+static void ci4_to_rgba8(const u8 *src, u8 *dst, int numPixels, uintptr_t palAddr) {
+    const u8 *pal = (const u8 *)palAddr;
+    for (int i = 0; i < numPixels; i++) {
+        u8 byte = src[i / 2];
+        u8 idx = (i & 1) ? (byte & 0xF) : (byte >> 4);
+        if (pal && ptr_in_pool((uintptr_t)pal)) {
+            u16 px = (u16)(pal[idx*2] << 8) | pal[idx*2+1];
+            dst[i*4+0] = ((px >> 11) & 0x1F) * 255 / 31;
+            dst[i*4+1] = ((px >>  6) & 0x1F) * 255 / 31;
+            dst[i*4+2] = ((px >>  1) & 0x1F) * 255 / 31;
+            dst[i*4+3] = (px & 1) ? 255 : 0;
+        } else {
+            dst[i*4+0] = idx*17; dst[i*4+1] = idx*17;
+            dst[i*4+2] = idx*17; dst[i*4+3] = 255;
+        }
+    }
+}
+
+/* Convert N64 RGBA32 (big-endian) to RGBA8888 */
+static void rgba32_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        dst[i*4+0] = src[i*4+0];
+        dst[i*4+1] = src[i*4+1];
+        dst[i*4+2] = src[i*4+2];
+        dst[i*4+3] = src[i*4+3];
+    }
+}
+
+/* Convert N64 IA16 (8-bit I, 8-bit A) to RGBA8888 */
+static void ia16_to_rgba8(const u8 *src, u8 *dst, int numPixels) {
+    for (int i = 0; i < numPixels; i++) {
+        u8 intensity = src[i*2];
+        u8 alpha     = src[i*2+1];
+        dst[i*4+0] = intensity;
+        dst[i*4+1] = intensity;
+        dst[i*4+2] = intensity;
+        dst[i*4+3] = alpha;
+    }
+}
+
+/* Draw a textured 2D rectangle using OpenGL */
+static void gl_tex_rect(int xl, int yl, int xh, int yh,
+                         const u8 *texData, int texW, int texH,
+                         float s0, float t0, float s1, float t1) {
+    if (!sTexRectTex) glGenTextures(1, &sTexRectTex);
+    glBindTexture(GL_TEXTURE_2D, sTexRectTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texW, texH, 0, GL_RGBA, GL_UNSIGNED_BYTE, texData);
+
+    /* Map N64 screen coords (320×240) to GL NDC (-1..1) */
+    float nx0 = (xl / 320.0f) * 2.0f - 1.0f;
+    float ny0 = 1.0f - (yl / 240.0f) * 2.0f;
+    float nx1 = (xh / 320.0f) * 2.0f - 1.0f;
+    float ny1 = 1.0f - (yh / 240.0f) * 2.0f;
+
+    /* Apply prim color modulation */
+    float pr, pg, pb, pa;
+    unpack_rgba(sRSP.primColor, &pr, &pg, &pb, &pa);
+
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor4f(pr, pg, pb, pa);
+    glBegin(GL_QUADS);
+    glTexCoord2f(s0, t0); glVertex2f(nx0, ny0);
+    glTexCoord2f(s1, t0); glVertex2f(nx1, ny0);
+    glTexCoord2f(s1, t1); glVertex2f(nx1, ny1);
+    glTexCoord2f(s0, t1); glVertex2f(nx0, ny1);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+}
+
+/* =========================================================================
+ * Shared helpers (used by both texture converters and DL processing)
+ * ========================================================================= */
 static bool ptr_in_pool(uintptr_t addr) {
     return addr >= 0x40000000 && addr < 0x50000000;
 }
@@ -285,6 +470,16 @@ static void unpack_rgba(u32 c, float *r, float *g, float *b, float *a) {
     *b = ((c >>  8) & 0xFF) / 255.0f;
     *a = ((c >>  0) & 0xFF) / 255.0f;
 }
+
+/* =========================================================================
+ * Display list processing
+ *
+ * F3DEX2 opcode constants are defined in ultra64.h (G_VTX, G_DL, etc.).
+ * The walker reads the opcode from the top byte of each Gfx word and
+ * dispatches to the appropriate handler.
+ * ========================================================================= */
+static unsigned sDLStats[256] = {};
+static unsigned sDLFrameCount = 0;
 
 /* Draw a filled 2D rectangle using immediate-mode GL (no shaders needed) */
 static void gl_fill_rect(int x0, int y0, int x1, int y1, u32 color) {
@@ -458,14 +653,45 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             /* Texture scale/enable — tracked for future texture support */
             break;
 
-        case G_SETTIMG:
-        case G_SETTILE:
+        case G_SETTIMG: {
+            sRSP.tex.imgFmt   = (dl->w.hi >> 21) & 0x07;
+            sRSP.tex.imgSiz   = (dl->w.hi >> 19) & 0x03;
+            sRSP.tex.imgWidth = (dl->w.hi & 0xFFF) + 1;
+            sRSP.tex.imgAddr  = (uintptr_t)(u32)dl->w.lo;
+            break;
+        }
+
+        case G_SETTILE: {
+            u32 tile = (dl->w.lo >> 24) & 0x07;
+            sRSP.tiles[tile].fmt  = (dl->w.hi >> 21) & 0x07;
+            sRSP.tiles[tile].siz  = (dl->w.hi >> 19) & 0x03;
+            sRSP.tiles[tile].line = (dl->w.hi >> 9) & 0x1FF;
+            sRSP.tiles[tile].tmem = dl->w.hi & 0x1FF;
+            break;
+        }
+
         case G_LOADBLOCK:
         case G_LOADTILE:
-        case G_SETTILESIZE:
-        case G_LOADTLUT:
-            /* Texture commands — stub until texture rendering implemented */
+            /* Texture data loading — the actual pixel data is read from
+             * sRSP.tex.imgAddr when G_TEXRECT is processed. */
             break;
+
+        case G_SETTILESIZE: {
+            u32 tile = (dl->w.lo >> 24) & 0x07;
+            sRSP.tiles[tile].uls = (dl->w.hi >> 12) & 0xFFF;
+            sRSP.tiles[tile].ult = (dl->w.hi >>  0) & 0xFFF;
+            sRSP.tiles[tile].lrs = (dl->w.lo >> 12) & 0xFFF;
+            sRSP.tiles[tile].lrt = (dl->w.lo >>  0) & 0xFFF;
+            break;
+        }
+
+        case G_LOADTLUT: {
+            /* Palette address stored in lo word by our fixed macro */
+            uintptr_t addr = (uintptr_t)(u32)dl->w.lo;
+            if (ptr_in_pool(addr))
+                sRSP.tlutAddr = addr;
+            break;
+        }
 
         case G_SETCOMBINE:
             /* Combiner mode — stub until shader-based rendering */
@@ -533,9 +759,93 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             break;
 
         case G_TEXRECT:
-        case G_TEXRECTFLIP:
-            /* Textured rectangle — stub */
+        case G_TEXRECTFLIP: {
+            /* Single-entry TEXRECT (Linux simplified encoding):
+             * hi: G_TEXRECT | xh[11:0]<<12 | yh[11:0]
+             * lo: tile<<24 | xl[11:0]<<12 | yl[11:0] */
+            int xh = (dl->w.hi >> 12) & 0xFFF;
+            int yh = (dl->w.hi >>  0) & 0xFFF;
+            /* u32 tile = (dl->w.lo >> 24) & 0x07; */
+            int xl = (dl->w.lo >> 12) & 0xFFF;
+            int yl = (dl->w.lo >>  0) & 0xFFF;
+
+            /* Convert 10.2 fixed point to integer pixels */
+            float fxl = xl / 4.0f, fyl = yl / 4.0f;
+            float fxh = xh / 4.0f, fyh = yh / 4.0f;
+            int texW = (int)(fxh - fxl);
+            int texH = (int)(fyh - fyl);
+            if (texW <= 0 || texH <= 0) break;
+            if (texW > 1024 || texH > 1024) break;
+
+            /* Read texture data from the image address set by G_SETTIMG */
+            uintptr_t imgAddr = sRSP.tex.imgAddr;
+            if (!ptr_in_pool(imgAddr)) break;
+
+            /* Determine bytes per pixel from image size format */
+            int bpp = 0;
+            switch (sRSP.tex.imgSiz) {
+                case 0: bpp = 0; break; /* 4b — handled specially */
+                case 1: bpp = 1; break; /* 8b */
+                case 2: bpp = 2; break; /* 16b */
+                case 3: bpp = 4; break; /* 32b */
+            }
+
+            /* Use the image width from G_SETTIMG for stride, texW for rect width */
+            int srcW = (int)sRSP.tex.imgWidth;
+            if (srcW <= 0) srcW = texW;
+
+            /* Convert N64 texture data to RGBA8888 */
+            int numPixels = texW * texH;
+            u8 *rgba = (u8 *)calloc(numPixels * 4, 1);
+            if (!rgba) break;
+
+            const u8 *src = (const u8 *)imgAddr;
+            u32 fmt = sRSP.tex.imgFmt;
+            u32 siz = sRSP.tex.imgSiz;
+
+            /* Convert row by row (source stride may differ from texW) */
+            for (int row = 0; row < texH; row++) {
+                const u8 *rowSrc;
+                u8 *rowDst = rgba + row * texW * 4;
+
+                if (bpp > 0)
+                    rowSrc = src + row * srcW * bpp;
+                else
+                    rowSrc = src + row * srcW / 2; /* 4-bit */
+
+                if (fmt == G_IM_FMT_RGBA && siz == G_IM_SIZ_16b)
+                    rgba16_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_RGBA && siz == G_IM_SIZ_32b)
+                    rgba32_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_IA && siz == G_IM_SIZ_16b)
+                    ia16_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_IA && siz == G_IM_SIZ_8b)
+                    ia8_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_IA && siz == G_IM_SIZ_4b)
+                    ia4_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_I && siz == G_IM_SIZ_8b)
+                    i8_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_I && siz == G_IM_SIZ_4b)
+                    i4_to_rgba8(rowSrc, rowDst, texW);
+                else if (fmt == G_IM_FMT_CI && siz == G_IM_SIZ_8b)
+                    ci8_to_rgba8(rowSrc, rowDst, texW, sRSP.tlutAddr);
+                else if (fmt == G_IM_FMT_CI && siz == G_IM_SIZ_4b)
+                    ci4_to_rgba8(rowSrc, rowDst, texW, sRSP.tlutAddr);
+                else {
+                    /* Unknown format — fill with magenta for debugging */
+                    for (int p = 0; p < texW; p++) {
+                        rowDst[p*4+0] = 255; rowDst[p*4+1] = 0;
+                        rowDst[p*4+2] = 255; rowDst[p*4+3] = 255;
+                    }
+                }
+            }
+
+            /* Simple UV mapping: full texture, no S/T offset */
+            gl_tex_rect((int)fxl, (int)fyl, (int)fxh, (int)fyh,
+                        rgba, texW, texH, 0.0f, 0.0f, 1.0f, 1.0f);
+            free(rgba);
             break;
+        }
 
         case G_CULLDL:
         case G_BRANCH_Z:
@@ -598,7 +908,7 @@ void SubmitFrame(OSScTask *task) {
         sRSP.fillColor = 0;
         sRSP.fogColor = 0;
         sRSP.blendColor = 0;
-        sRSP.primColor = 0;
+        sRSP.primColor = 0xFFFFFFFF; /* default white/opaque */
         sRSP.envColor = 0;
         sRSP.geometryMode = 0;
         sRSP.cycleType = 0;
@@ -606,6 +916,13 @@ void SubmitFrame(OSScTask *task) {
         sRSP.scissorY = 0;
         sRSP.scissorW = sWidth;
         sRSP.scissorH = sHeight;
+        sRSP.tex.imgAddr = 0;
+        sRSP.tex.imgFmt = 0;
+        sRSP.tex.imgSiz = 0;
+        sRSP.tex.imgWidth = 0;
+        sRSP.tlutAddr = 0;
+        sRSP.texType = 0;
+        memset(sRSP.tiles, 0, sizeof(sRSP.tiles));
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDisable(GL_SCISSOR_TEST);

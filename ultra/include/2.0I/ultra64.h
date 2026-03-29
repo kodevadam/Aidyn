@@ -794,7 +794,7 @@ extern u8 gspF3DEX2_fifoDataStart[4];
     ((u32)G_LOADTLUT << 24), ((u32)(pal) << 24) | 0x0F0000)
 
 #define gDPLoadTLUT_pal256(gdl, dram) _GBI_CMD(gdl, \
-    ((u32)G_LOADTLUT << 24), 0x00FF0000)
+    ((u32)G_LOADTLUT << 24) | 0xFF, (u32)(uintptr_t)(dram))
 
 /* --- Combiner / render mode --- */
 #define gDPSetCombineMode(gdl, a, b) _GBI_CMD(gdl, (u32)G_SETCOMBINE << 24, 0)
@@ -837,8 +837,16 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define gDPSetPrimDepth(gdl, z, dz)  _GBI_CMD(gdl, (u32)G_SETPRIMDEPTH << 24, \
     ((u32)(z) << 16) | (u32)(dz))
 
-/* --- Texture rectangle (2D blit) --- */
-#define gSPScisTextureRectangle(gdl, ...) _GBI_CMD(gdl, (u32)G_TEXRECT << 24, 0)
+/* --- Texture rectangle (2D blit) ---
+ * Encodes rect coords in a single Gfx entry (simplified for Linux port).
+ * hi: G_TEXRECT | xh[11:0]<<12 | yh[11:0]
+ * lo: tile<<24 | xl[11:0]<<12 | yl[11:0]
+ * S/T/dsdx/dtdy are not encoded (backend uses full-texture UV mapping).
+ */
+#define gSPScisTextureRectangle(pkt, xl, yl, xh, yh, tile, s, t, dsdx, dtdy) \
+    _GBI_CMD(pkt, \
+        ((u32)G_TEXRECT << 24) | (((u32)(xh) & 0xFFF) << 12) | ((u32)(yh) & 0xFFF), \
+        ((u32)(tile) << 24) | (((u32)(xl) & 0xFFF) << 12) | ((u32)(yl) & 0xFFF))
 
 /* --- Fog --- */
 #define gSPFogPosition(gdl, mn, mx) _GBI_CMD(gdl, \
