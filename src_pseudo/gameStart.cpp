@@ -143,6 +143,12 @@ u8 gameStart(Gfx**GG){
      ((gGlobals.gameStartOption == 2 && (gGlobals.screenFadeMode != ScreenFade_None)))) {
     gfx = RenderFlycam(gfx);
     if (flycam_flag) fadeFloatMirror = 1.0f;
+#ifdef __linux__
+    /* On Linux the flycam scene doesn't load, so the screen fade system
+     * never transitions brightness from 0→1.  Force it so widgets render. */
+    gGlobals.brightness = 1.0f;
+    fadeFloatMirror = 1.0f;
+#endif
     RSPFUNC6(gfx);
 
     for(uVar2=0;uVar2<gGlobals.delta;uVar2++) {WHANDLE->Tick(1);}
