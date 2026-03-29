@@ -62,17 +62,13 @@ Borg8Header* loadBorg8(u32 index){
   if (!item) return borg8_empty_stub(index);
 
 #ifdef __linux__
-  /* On N64, loadBorg8 casts Borg1Header* to Borg8Header*, reinterpreting
-   * fields through the 32-bit struct overlay.  On 64-bit Linux, we must
-   * construct a proper Borg8Header from the Borg1 data.
+  /* On N64 (32-bit), loadBorg8 casts Borg1Header* to Borg8Header*.
+   * On 64-bit Linux we must construct the Borg8Header manually.
    *
-   * The N64 Borg8Data overlay at allocation offset 8:
-   *   format(u16) + Width(u16) = Borg1Header.bitmapA (4 bytes on N64)
-   *   Height(u16) + unk06(u16) = Borg1Header.bitmapB (4 bytes on N64)
-   *   palette(u32) = Borg1Header.dat pointer (4 bytes on N64)
-   *   offset(u32) = first 4 bytes of decompressed data (N64 BorgHSize=16)
-   *
-   * We reconstruct these from the raw N64 binary data. */
+   * The N64 overlay between Borg1Header and Borg8Header depends on the
+   * allocation layout (combined vs. separate).  Rather than replicate that
+   * fragile overlay, we reconstruct Borg8 fields from the parsed Borg1Data
+   * and the raw N64 data blob. */
   s16 listingType = get_borg_listing_type(index);
   if (listingType == 1) {
     Borg1Header *b1 = (Borg1Header *)item;
@@ -80,6 +76,14 @@ Borg8Header* loadBorg8(u32 index){
 
     u16 b1type = b1->dat->type;
     if (b1type > 8) return borg8_empty_stub(index);
+
+    /* Log all Borg1Data fields for diagnostics */
+    fprintf(stderr, "[loadBorg8] index=%u Borg1Data: type=%u flag=0x%04x W=%u H=%u lods=%u move=%u "
+            "dList=%p bmp=%p pal=%p unk14=0x%x\n",
+            index, b1->dat->type, b1->dat->flag, b1->dat->Width, b1->dat->Height,
+            b1->dat->lods, b1->dat->move,
+            (void*)b1->dat->dList, (void*)b1->dat->bmp, (void*)b1->dat->pallette,
+            b1->dat->unk14);
 
     Borg8Header *b8;
     ALLOCS(b8, sizeof(Borg8Header), 35);
@@ -90,64 +94,96 @@ Borg8Header* loadBorg8(u32 index){
       BORG8_RGBA16, BORG8_IA16, BORG8_CI8, BORG8_IA8,
       BORG8_I8, BORG8_CI4, BORG8_IA4, BORG8_I4, BORG8_RBGA32
     };
+    b8->dat.format = (b1type < 9) ? b1_to_b8[b1type] : BORG8_RGBA16;
+    b8->dat.unk06  = ((u16)b1->dat->lods << 8) | (u16)b1->dat->move;
 
-    /* Use Borg1Data fields for format, palette, and bitmap pointer */
-    b8->dat.format  = (b1type < 9) ? b1_to_b8[b1type] : BORG8_RGBA16;
-    b8->dat.unk06   = 0;
-    b8->dat.palette = b1->dat->pallette;
+    /* Bitmap and palette pointers.
+     * On N64 overlay: palette = dList field, offset = bmp field.
+     * Our parsed Borg1Data has these as host pointers. */
     b8->dat.offset  = (void *)b1->bitmapA;
 
-    /* For Width/Height: the Borg1Data W/H are single bytes (max 255),
-     * but the ACTUAL texture dimensions can be larger (e.g., font atlas
-     * 36x414).  On N64, the real dimensions come from the Borg8Data
-     * overlay which reads bitmapA as two u16 values.
-     *
-     * Compute the REAL dimensions from the bitmap size:
-     * bitmap_bytes = total_data_size - bmpOff.
-     * The Borg1Data.Width gives the stride (pixels per row).
-     * Real height = bitmap_bytes / (stride * bytes_per_pixel). */
-    u8 w8 = b1->dat->Width;
-    u8 h8 = b1->dat->Height;
-    u16 realW = (u16)w8;
-    u16 realH = (u16)h8;
+    /* For CI formats, palette lives at dList position in the N64 overlay.
+     * For non-CI formats, palette = NULL. */
+    bool isCI = (b1type == 2 || b1type == 5); /* B1_CI8 or B1_CI4 */
+    b8->dat.palette = isCI ? (u16 *)b1->dat->dList : nullptr;
+    /* Fallback: if dList was NULL but pallette was set, use pallette */
+    if (isCI && !b8->dat.palette && b1->dat->pallette)
+      b8->dat.palette = b1->dat->pallette;
 
-    if (b1->bitmapA) {
-      /* Get bmpOff from the raw N64 data: it's the offset within the decompressed
-       * blob where the bitmap starts.  Read from Borg1Data fields. */
-      u32 bmpOff = 0;
-      /* The bmp pointer = raw_data_base + bmpOff.  We stored the original offset
-       * in Borg1Data by borg1_parse_n64.  Recover it from the pointer difference
-       * between bitmapA and the raw data start (which is the allocation + headerSize). */
-      {
-        /* Use the listing to get the uncompressed size and compute bitmap dimensions */
-        BorgListing bl;
-        extern void *BorgListingPointer;
-        if ((s32)index >= 0 && (s32)index < 4328) {
-          ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),
-                   sizeof(BorgListing), 37);
-          swapBorgListing_img(&bl);
-          u32 totalData = bl.uncompressed;
-          /* bmpOff is the offset of the bitmap within the raw data.
-           * For standard Borg1Data with 24-byte header: bmpOff = 0x18.
-           * Read it from the parsed Borg1Data dList/bmp offset relationship.
-           * Simple approach: raw Borg1Data header is 24 bytes max, bmp typically at 0x18. */
-          bmpOff = 0x18; /* standard Borg1Data header size = bitmap offset */
-          u32 bitmapBytes = (totalData > bmpOff) ? totalData - bmpOff : 0;
-          /* Compute real height from bitmap bytes and width */
-          u32 bpp = 2; /* default RGBA16 */
-          if (b1type == 2 || b1type == 3 || b1type == 4) bpp = 1; /* CI8, IA8, I8 */
-          else if (b1type == 5 || b1type == 6 || b1type == 7) bpp = 1; /* CI4/IA4/I4: 0.5 bpp but stride in bytes */
-          else if (b1type == 8) bpp = 4; /* RGBA32 */
-          if (w8 > 0 && bpp > 0) {
-            u32 computedH = bitmapBytes / (w8 * bpp);
-            if (computedH > h8 && computedH <= 1024) {
-              fprintf(stderr, "[loadBorg8] index=%u: extending height from %u to %u (bitmap=%u bytes, W=%u, bpp=%u)\n",
-                      index, h8, computedH, bitmapBytes, w8, bpp);
-              realH = (u16)computedH;
-            }
-          }
+    /* Width and Height reconstruction.
+     *
+     * On N64 the Borg8 overlay reads Width and Height from fields that
+     * overlap with the Borg1 data differently depending on the allocation
+     * layout.  The Borg1Data u8 Width/Height fields (max 255) aren't enough
+     * for larger textures like font atlases.
+     *
+     * Strategy: use the Borg1Data.flag as Width (the N64 overlay interprets
+     * flag as Borg8.Width in the combined allocation layout), then compute
+     * Height from the bitmap size.  If flag is 0 or unreasonable, fall back
+     * to the u8 Width. */
+    u16 b1flag = b1->dat->flag;
+    u8  w8     = b1->dat->Width;
+    u8  h8     = b1->dat->Height;
+
+    /* Bytes per pixel for height computation */
+    u32 bpp = 2; /* RGBA16 default */
+    switch (b1type) {
+      case 2: case 3: case 4: bpp = 1; break; /* CI8, IA8, I8 */
+      case 5: case 6: case 7: bpp = 1; break; /* CI4/IA4/I4 half-byte, but stride is in pixels */
+      case 8: bpp = 4; break; /* RGBA32 */
+    }
+
+    /* Determine real width: try flag first, fall back to u8 Width */
+    u16 realW = (b1flag > 0 && b1flag <= 1024) ? b1flag : (u16)w8;
+
+    /* Determine real height from bitmap byte count */
+    u16 realH = (u16)h8;
+    BorgListing bl;
+    extern void *BorgListingPointer;
+    if ((s32)index >= 0 && (s32)index < 4328 && b1->bitmapA) {
+      ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),
+               sizeof(BorgListing), 37);
+      swapBorgListing_img(&bl);
+      u32 totalData = bl.uncompressed;
+
+      /* Compute bitmap offset: difference between bmp pointer and raw data start.
+       * The raw data start = bmp - bmp_raw_offset. We can find the raw base from
+       * the dList pointer: dList is at raw + dList_offset.
+       * If both bmp and dList are available, rawBase = min(bmp, dList) - smallest_offset.
+       *
+       * Simpler: bitmap bytes = totalData - bmpOffset. Try to recover bmpOffset
+       * from the pointer difference between bmp and the earliest known pointer. */
+      u32 bmpOff = 0x18; /* default: 24-byte Borg1Data header */
+
+      /* If we have both dList and bmp pointers, compute bmpOff from their difference */
+      if (b1->dat->dList && b1->dat->bmp) {
+        uintptr_t dListAddr = (uintptr_t)b1->dat->dList;
+        uintptr_t bmpAddr   = (uintptr_t)b1->dat->bmp;
+        /* rawBase = min of (dListAddr, bmpAddr) minus its offset.
+         * For CI8: dList is likely at offset 24 (palette), bmp after palette. */
+        if (bmpAddr > dListAddr) {
+          /* dList (palette) comes first, bmp comes after */
+          bmpOff = (u32)(bmpAddr - dListAddr) + 24; /* dList typically at offset 24 */
         }
       }
+
+      u32 bitmapBytes = (totalData > bmpOff) ? totalData - bmpOff : 0;
+      if (realW > 0 && bpp > 0 && bitmapBytes > 0) {
+        u32 stride = realW;
+        /* For 4-bit formats, 2 pixels per byte */
+        if (b1type == 5 || b1type == 6 || b1type == 7)
+          stride = (realW + 1) / 2;
+        else
+          stride = realW * bpp;
+
+        u32 computedH = bitmapBytes / stride;
+        if (computedH > 0 && computedH <= 2048) {
+          realH = (u16)computedH;
+        }
+      }
+
+      fprintf(stderr, "[loadBorg8] index=%u: listing uncomp=%u bmpOff=%u bitmapBytes=%u → W=%u H=%u (b1flag=%u w8=%u h8=%u)\n",
+              index, totalData, bmpOff, bitmapBytes, realW, realH, b1flag, w8, h8);
     }
 
     b8->dat.Width  = realW;
