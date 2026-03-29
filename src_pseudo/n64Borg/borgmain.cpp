@@ -137,7 +137,11 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
                 c[16],c[17],c[18],c[19],c[20],c[21],c[22],c[23],
                 c[24],c[25],c[26],c[27],c[28],c[29],c[30],c[31]);
       }
-      s32 lzbRet = decompress_LZB(compressedDat, compSize, tmpBuf + LZB_PREFIX, auStack40);
+      /* Try LZB_func_2 (16-bit bitstream variant) instead of decompress_LZB (8-bit).
+       * The decompiled code may have mapped the wrong function for Compress_LZB. */
+      s32 lzbOutSize = (s32)auStack40[0];
+      s32 lzbRet = LZB_func_2(compressedDat, compSize, tmpBuf + LZB_PREFIX, &lzbOutSize);
+      auStack40[0] = (u32)lzbOutSize;
       if (lzbRet < 0 && lzbRet != -205) {
         /* -205 means "end marker found but didn't consume all input" — likely trailing
          * padding, treat as success.  Other negative codes are real failures. */
