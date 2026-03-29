@@ -658,6 +658,16 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             sRSP.tex.imgSiz   = (dl->w.hi >> 19) & 0x03;
             sRSP.tex.imgWidth = (dl->w.hi & 0xFFF) + 1;
             sRSP.tex.imgAddr  = (uintptr_t)(u32)dl->w.lo;
+            {
+                static int sSettimgLog = 0;
+                if (sSettimgLog < 10) {
+                    fprintf(stderr, "[gfx] SETTIMG: addr=0x%08x fmt=%u siz=%u w=%u pool=%d\n",
+                            (u32)dl->w.lo, sRSP.tex.imgFmt, sRSP.tex.imgSiz,
+                            sRSP.tex.imgWidth, ptr_in_pool(sRSP.tex.imgAddr));
+                    fflush(stderr);
+                    sSettimgLog++;
+                }
+            }
             break;
         }
 
@@ -782,6 +792,7 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
                         fxl, fyl, fxh, fyh, texW, texH,
                         (unsigned long)sRSP.tex.imgAddr, sRSP.tex.imgFmt, sRSP.tex.imgSiz,
                         sRSP.tex.imgWidth, sRSP.primColor);
+                fflush(stderr);
                 sTexRectLog++;
             }
 
