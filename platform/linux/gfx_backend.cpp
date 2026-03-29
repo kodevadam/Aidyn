@@ -774,12 +774,30 @@ static void process_display_list(const Gfx *dl, int depth = 0) {
             float fxh = xh / 4.0f, fyh = yh / 4.0f;
             int texW = (int)(fxh - fxl);
             int texH = (int)(fyh - fyl);
+
+            static int sTexRectLog = 0;
+            if (sTexRectLog < 30) {
+                fprintf(stderr, "[gfx] TEXRECT: xl=%.1f yl=%.1f xh=%.1f yh=%.1f w=%d h=%d "
+                        "imgAddr=0x%lx fmt=%u siz=%u imgW=%u prim=0x%08x\n",
+                        fxl, fyl, fxh, fyh, texW, texH,
+                        (unsigned long)sRSP.tex.imgAddr, sRSP.tex.imgFmt, sRSP.tex.imgSiz,
+                        sRSP.tex.imgWidth, sRSP.primColor);
+                sTexRectLog++;
+            }
+
             if (texW <= 0 || texH <= 0) break;
             if (texW > 1024 || texH > 1024) break;
 
             /* Read texture data from the image address set by G_SETTIMG */
             uintptr_t imgAddr = sRSP.tex.imgAddr;
-            if (!ptr_in_pool(imgAddr)) break;
+            if (!ptr_in_pool(imgAddr)) {
+                if (sTexRectLog <= 33) {
+                    fprintf(stderr, "[gfx] TEXRECT: imgAddr 0x%lx NOT in pool, skipping\n",
+                            (unsigned long)imgAddr);
+                    sTexRectLog++;
+                }
+                break;
+            }
 
             /* Determine bytes per pixel from image size format */
             int bpp = 0;
