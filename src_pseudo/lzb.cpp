@@ -89,11 +89,13 @@ LAB_800aa478:
       if (0) fprintf(stderr, "[lzb] iter=%u: offset extra byte=0x%02x → iVar7=(%d-3)*256+%u=%d\n",
               iter, compDat[uVar6], iVar7, (u32)compDat[uVar6], (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6]);
       {
-        /* The offset byte is signed on N64 (lb instruction, not lbu).
-         * This is required for the end marker: Elias=3, byte=0xFF → offset=-1.
-         * But for Elias=3 with byte 128-254, the signed result is negative
-         * (not -1), which would produce an invalid distance. In that case,
-         * fall back to unsigned interpretation. */
+        /* The offset byte is signed (lb on MIPS, not lbu). This is required
+         * for the end marker: Elias=3, byte=0xFF → offset=-1.
+         * For other negative offsets (Elias=3, byte 0x80-0xFE), the N64's
+         * 32-bit unsigned arithmetic wraps the distance to a FORWARD reference:
+         *   dist = offset+1 (negative) → u32 → OutDat-dist wraps to OutDat+small
+         * This reads from not-yet-written output (zeros on N64).
+         * On 64-bit Linux, simulate by reading zeros for these cases. */
         s32 rawByte = (s32)(s8)compDat[uVar6];
         s32 newOff = (iVar7 + -3) * 0x100 + rawByte;
         if (newOff == -1) {
@@ -103,14 +105,17 @@ LAB_800aa478:
           else { errOut = -0xc9; if (uVar6 < CompSize) errOut = -0xcd; }
           return errOut;
         }
-        if (newOff < 0) {
-          /* Negative offset (not end marker) — use unsigned byte instead */
-          newOff = (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6];
-        }
         iVar7 = newOff;
       }
       uVar6++;
-      uVar8 = iVar7 + 1;
+      if (iVar7 < 0) {
+        /* Negative offset: on N64 32-bit, this wraps to a forward reference
+         * reading zeros from uninitialized output. Simulate by setting
+         * uVar8 to a "forward" distance that reads zeros. */
+        uVar8 = 0; /* will be caught by zero-distance check → use zeros */
+      } else {
+        uVar8 = iVar7 + 1;
+      }
     }
     uVar5 <<= 1;
     if ((uVar5 & 0xff) == 0) {
@@ -158,48 +163,33 @@ LAB_800aa598:
       iVar7+=2;
     }
     iVar7 += !(uVar8 < 0xd01);
-    /* Validate back-reference distance */
+    if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
+    /* Copy bytes from back-reference.
+     * On N64 (32-bit), negative offsets wrap to forward references
+     * reading zeros from uninitialized RDRAM. On 64-bit Linux, we must
+     * handle: pre-output refs (before buffer), forward refs (negative
+     * offset wrapped on 32-bit), and normal back-references. */
     {
       u32 bytesWritten = (u32)(OutDat - OutDatStart);
-      if (uVar8 == 0) {
-        fprintf(stderr, "[lzb] FATAL: zero distance in=%u/%u iter=%u\n", uVar6, CompSize, iter);
-        *outSize = iVar9;
-        return -1;
-      }
-      if (uVar8 > bytesWritten) {
-        /* Back-reference goes before output start — read from zero prefix if available,
-         * but log it so we can tell if this is expected or a codec bug */
-        static int preOutRefCount = 0;
-        if (preOutRefCount < 5) {
-          fprintf(stderr, "[lzb] WARNING: pre-output backref dist=%u written=%u (reading zeros) in=%u/%u iter=%u\n",
-                  uVar8, bytesWritten, uVar6, CompSize, iter);
-          preOutRefCount++;
-        }
-        /* Allow it if within 128KB prefix, reject if beyond */
-        static constexpr u32 LZB_MAX_PREFIX = 128u * 1024;
-        if (uVar8 > LZB_MAX_PREFIX + bytesWritten) {
-          fprintf(stderr, "[lzb] FATAL: backref dist=%u exceeds prefix+written in=%u/%u iter=%u\n",
-                  uVar8, uVar6, CompSize, iter);
-          *outSize = iVar9;
-          return -1;
-        }
-      }
-    }
-    if (iter <= 5) fprintf(stderr, "[lzb] iter=%u: COPY dist=%u len=%d out=%d\n", iter, uVar8, iVar7+1, iVar9);
-    pbVar1 = OutDat - uVar8;
-    iVar9++;
-    /* Safe read: if back-reference points before output start, read 0
-     * (N64 uses a zeroed dictionary for pre-output references) */
-    *OutDat = (pbVar1 < OutDatStart) ? 0 : *pbVar1;
-    OutDat++;
-    do {
-      if (iVar9 >= (s32)maxOut) break;
-      pbVar1++;
+      bool validDist = (uVar8 > 0 && uVar8 <= bytesWritten);
+      pbVar1 = validDist ? (OutDat - uVar8) : OutDat; /* forward ref → read from current pos */
       iVar9++;
-      iVar7--;
-      *OutDat = (pbVar1 < OutDatStart) ? 0 : *pbVar1;
+      *OutDat = validDist ? *pbVar1 : 0;
       OutDat++;
-    } while (iVar7 != 0);
+      do {
+        if (iVar9 >= (s32)maxOut) break;
+        pbVar1++;
+        iVar9++;
+        iVar7--;
+        /* For valid back-refs, read sequentially. For invalid, output 0. */
+        if (validDist && pbVar1 < OutDat) {
+          *OutDat = *pbVar1;
+        } else {
+          *OutDat = 0;
+        }
+        OutDat++;
+      } while (iVar7 != 0);
+    }
   } while (iVar9 < (s32)maxOut);
 LZB_DONE:
   *outSize = iVar9;
