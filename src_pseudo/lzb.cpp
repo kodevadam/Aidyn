@@ -88,21 +88,28 @@ LAB_800aa478:
       LZB_CHECK_IN("offset-byte");
       if (0) fprintf(stderr, "[lzb] iter=%u: offset extra byte=0x%02x → iVar7=(%d-3)*256+%u=%d\n",
               iter, compDat[uVar6], iVar7, (u32)compDat[uVar6], (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6]);
-      iVar7 = (iVar7 + -3) * 0x100 + (s32)(s8)compDat[uVar6];
-      uVar6++;
-      if (iVar7 == -1) {
-        *outSize = iVar9;
-        if (uVar6 == CompSize) {
-          errOut = 0;
+      {
+        /* The offset byte is signed on N64 (lb instruction, not lbu).
+         * This is required for the end marker: Elias=3, byte=0xFF → offset=-1.
+         * But for Elias=3 with byte 128-254, the signed result is negative
+         * (not -1), which would produce an invalid distance. In that case,
+         * fall back to unsigned interpretation. */
+        s32 rawByte = (s32)(s8)compDat[uVar6];
+        s32 newOff = (iVar7 + -3) * 0x100 + rawByte;
+        if (newOff == -1) {
+          uVar6++;
+          *outSize = iVar9;
+          if (uVar6 == CompSize) errOut = 0;
+          else { errOut = -0xc9; if (uVar6 < CompSize) errOut = -0xcd; }
+          return errOut;
         }
-        else {
-          errOut = -0xc9;
-          if (uVar6 < CompSize) {
-            errOut = -0xcd;
-          }
+        if (newOff < 0) {
+          /* Negative offset (not end marker) — use unsigned byte instead */
+          newOff = (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6];
         }
-        return errOut;
+        iVar7 = newOff;
       }
+      uVar6++;
       uVar8 = iVar7 + 1;
     }
     uVar5 <<= 1;
