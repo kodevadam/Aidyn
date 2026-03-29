@@ -210,8 +210,8 @@ Gfx * borg8DlistInit(Gfx *gfx,u8 flag,u16 h,u16 v){
   u32 word1;
   u32 word0;
   
-  sImageHScale = h / (float)SCREEN_WIDTH;
-  sImageVScale = v / (float)SCREEN_HEIGHT;
+  sImageHScale = (h > 0) ? h / (float)SCREEN_WIDTH : 1.0f;
+  sImageVScale = (v > 0) ? v / (float)SCREEN_HEIGHT : 1.0f;
   gDPPipeSync(gfx++);
   gDPSetCycleType(gfx++,G_CYC_1CYCLE);
   gDPPipelineMode(gfx++,G_PM_1PRIMITIVE);
@@ -302,6 +302,9 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
   imgXScale = xScale * sImageHScale;
   void*BMP = (borg8->dat).offset;
   imgYScale = yScale * sImageVScale;
+  /* Guard: zero scale causes SIGFPE in 1024.0/scale → (int)inf conversion */
+  if (imgXScale == 0.0f) imgXScale = 1.0f;
+  if (imgYScale == 0.0f) imgYScale = 1.0f;
   hVis = (u32)h - (u32)xOff;
   fVar36 = x * sImageHScale;
   uVar1 = (borg8->dat).Width;
