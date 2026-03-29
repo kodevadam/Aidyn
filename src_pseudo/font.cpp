@@ -102,6 +102,7 @@ u8 Font::LoadFace(FontStruct *fontP,u32 b8,u8 rows,u8 cols){
       if (uVar1 == 0 || uVar2 == 0 || !(pBVar4->dat).offset) {
         fprintf(stderr, "[font] LoadFace: borg %u has invalid dimensions W=%u H=%u offset=%p – skipping\n",
                 b8, uVar1, uVar2, (pBVar4->dat).offset);
+        fontP->fontsLoaded--; /* undo increment so this slot gets reused */
         return false;
       }
       pFVar7->borgW = uVar1;
