@@ -111,12 +111,11 @@ Borg8Header* loadBorg8(u32 index){
       uintptr_t datStart = (uintptr_t)b1->dat;
       if (bmpStart > datStart) {
         u32 bmpOff = (u32)(bmpStart - datStart);
-        /* Get the uncompressed size from the listing to compute total data */
+        /* Use the ORIGINAL borg index (not header->index which is -1 in borgFlag mode) */
         BorgListing bl;
         extern void *BorgListingPointer;
-        s32 hdrIdx = b1->head.index;
-        if (hdrIdx >= 0) {
-          ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + hdrIdx * sizeof(BorgListing) + 8),
+        if ((s32)index >= 0 && (s32)index < 4328) {
+          ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),
                    sizeof(BorgListing), 37);
           swapBorgListing_img(&bl);
           u32 totalData = bl.uncompressed;
