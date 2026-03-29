@@ -310,6 +310,14 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
   uVar1 = (borg8->dat).Width;
   /* Guard: zero-size draws cause division underflow → skip */
   if (h <= xOff || v <= yOff || hVis == 0) return g;
+  { static int drawLog = 0;
+    if (drawLog < 5 && BMP != nullptr) {
+      fprintf(stderr, "[borg8draw] BMP=%p W=%u fmt=%u hVis=%u vVis=%u g=%p imgXScale=%.2f imgYScale=%.2f\n",
+              BMP, (borg8->dat).Width, (borg8->dat).format, hVis,
+              (u32)v - (u32)yOff, (void*)g, (double)imgXScale, (double)imgYScale);
+      drawLog++;
+    }
+  }
   gDPPipeSync(g++);
   gDPSetPrimColor(g++,0,0,red,green,blue,alpha);
   uVar16 = (u32)yOff;
