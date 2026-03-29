@@ -298,6 +298,14 @@ borgHeader * getBorgItem(s32 index){
           fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
           HFREE(borgfile,603); HFREE(ret,604); return NULL;
         }
+        /* Dump raw decompressed header for font items (28, 29) */
+        if (index == 28 || index == 29) {
+          u32 n = listing.uncompressed < 32 ? listing.uncompressed : 32;
+          fprintf(stderr, "[borg] item %d raw decompressed (%u bytes total, Comp=%d):",
+                  index, listing.uncompressed, listing.Compression);
+          for (u32 i = 0; i < n; i++) fprintf(stderr, " %02x", borgfile[i]);
+          fprintf(stderr, "\n");
+        }
 #ifdef __linux__
         /* On Linux, skip N64 pointer fixup (func_a) — the blob data uses
          * 32-bit N64 pointer layout which is incompatible with 64-bit.

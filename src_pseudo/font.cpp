@@ -168,6 +168,14 @@ int Font::printSimple(FontStruct *fontP,Gfx **gg,char *txt,int x,int y,float sca
   sVar4 = fontP->charW;
   sVar5 = fontP->charH;
   xCurr = x;
+  { static int fontLogCount = 0;
+    if (fontLogCount < 5) {
+      fprintf(stderr, "[font] printSimple: charW=%d charH=%d scale=%.2f txt='%.20s' currFont=%p kerning=%p\n",
+              sVar4, sVar5, (double)scalex, txt ? txt : "(null)",
+              (void*)fontP->currFont, (void*)fontP->kerning);
+      fontLogCount++;
+    }
+  }
   if ((fontP->currFont != NULL) && fontP->kerning && (*txt)) {
     bVar1 = *txt;
     while( true ) {
