@@ -333,7 +333,10 @@ borgHeader * getBorgItem(s32 index){
         fprintf(stderr, "[borg] index %d Type=%d: calling borg_funcs_a/b\n", index, listing.Type);
 #ifdef __linux__
         if (listing.Type == 1) {
-          (*borg_funcs_a[listing.Type])(ret);
+          /* In borgFlag mode, ret is the combined header+data allocation.
+           * func_a would parse the header bytes as N64 data (wrong).
+           * Skip func_a — func_b (InitBorgTexture) handles parsing
+           * correctly by computing data offset from header. */
           (*borg_funcs_b[listing.Type])(ret,0);
         } else {
           fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux (borgFlag)\n", index, listing.Type);
