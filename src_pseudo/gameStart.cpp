@@ -151,8 +151,20 @@ u8 gameStart(Gfx**GG){
 #endif
     RSPFUNC6(gfx);
 
+    { static int gsLog = 0;
+      if (gsLog < 3) {
+        fprintf(stderr, "[gameStart] before WHANDLE->Render: gfx=%p\n", (void*)gfx);
+        gsLog++;
+      }
+    }
     for(uVar2=0;uVar2<gGlobals.delta;uVar2++) {WHANDLE->Tick(1);}
     gfx = WHANDLE->Render(gfx,FULL_SCREENSPACE);
+    { static int gsLog2 = 0;
+      if (gsLog2 < 3) {
+        fprintf(stderr, "[gameStart] after WHANDLE->Render: gfx=%p\n", (void*)gfx);
+        gsLog2++;
+      }
+    }
     gfx = N64Print::Draw(gfx,1);
   }
   pos = &fStack104;
