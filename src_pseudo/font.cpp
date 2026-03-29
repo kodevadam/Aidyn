@@ -268,6 +268,15 @@ int Font::PrintMain(FontStruct *font,Gfx **gg,char *txt,int posX,int posY,s16 pa
   uStack_58 = (u16)font->charW;
   iVar11 = 0;
   uStack_54 = (u16)font->charH;
+  { static int pmLog = 0;
+    if (pmLog < 3) {
+      fprintf(stderr, "[font] PrintMain: charW=%u charH=%u currFont=%p kerning=%p txt='%.20s' fadeFloat=%.2f\n",
+              (unsigned)uStack_58, (unsigned)uStack_54,
+              (void*)font->currFont, (void*)font->kerning,
+              txt ? txt : "(null)", 0.0);
+      pmLog++;
+    }
+  }
   if ((((font->currFont == NULL) || (font->kerning == NULL) || (iStack_64 <= param_6)) ||
       (param_10 <= param_8)) || (param_11 <= param_9)) {
     iStack_5c = 0;
