@@ -606,8 +606,13 @@ LAB_8009c6c0:
 
 //Count the attempts to Get controller input.
 u16 Controller::GetDelay(u8 port){
-  controller_aidyn* temp=NULL;  
+  controller_aidyn* temp=NULL;
   u16 x = 0;
   while (GetInput(&temp,port)) {x++;}
+#ifdef __linux__
+  /* On Linux, ensure at least 1 tick so game logic advances even when
+   * the controller thread isn't feeding input at the retrace rate. */
+  if (x == 0) x = 1;
+#endif
   return x;
 }

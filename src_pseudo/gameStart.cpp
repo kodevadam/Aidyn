@@ -211,6 +211,11 @@ void TitleScreenInput(void){
     }
   }
   gGlobals.delta = (float)uVar3;
+#ifdef __linux__
+  /* On Linux, the controller thread may not be feeding input.
+   * Ensure delta is always at least 1 so the game logic advances. */
+  if (gGlobals.delta < 1.0f) gGlobals.delta = 1.0f;
+#endif
 }
 
 
