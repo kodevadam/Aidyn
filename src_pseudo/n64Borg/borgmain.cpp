@@ -280,6 +280,14 @@ borgHeader * getBorgItem(s32 index){
          * borg1 has its own borg1_parse_n64 path; others are stubbed. */
         if (listing.Type == 1) /* borg1 has Linux-specific parsing */
           (*borg_funcs_a[listing.Type])(borgfile);
+        else {
+          /* Non-type-1 items: func_a skipped, func_b depends on func_a.
+           * Return NULL so callers use their NULL guards. */
+          fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux\n", index, listing.Type);
+          if (borgFlag) { HFREE(ret,605); }
+          else { HFREE(borgfile,605); HFREE(ret,606); }
+          return NULL;
+        }
 #else
         (*borg_funcs_a[listing.Type])(borgfile);
 #endif
@@ -315,10 +323,18 @@ borgHeader * getBorgItem(s32 index){
         }
         fprintf(stderr, "[borg] index %d Type=%d: calling borg_funcs_a/b\n", index, listing.Type);
 #ifdef __linux__
-        if (listing.Type == 1)
-#endif
+        if (listing.Type == 1) {
+          (*borg_funcs_a[listing.Type])(ret);
+          (*borg_funcs_b[listing.Type])(ret,0);
+        } else {
+          fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux (borgFlag)\n", index, listing.Type);
+          HFREE(ret,628);
+          return NULL;
+        }
+#else
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
+#endif
         gBorgpointers[index] = NULL;
         gBorgBytes[index] = 0;
         ret->index = -1;
