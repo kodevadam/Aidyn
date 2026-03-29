@@ -1,5 +1,13 @@
 #include "n64Borg.h"
 #include "crash.h"
+#include "romcopy.h"
+#ifdef __linux__
+#include "endian_swap.h"
+static inline void swapBorgListing_img(BorgListing *l) {
+    BE16S(l->Type); BE16S(l->Compression);
+    BE32S(l->compressed); BE32S(l->uncompressed); BE32S(l->Offset);
+}
+#endif
 
 #define FILENAME "./src/n64BorgImage.cpp"
 
@@ -49,45 +57,94 @@ Borg8Header* loadBorg8(u32 index){
   if (!item) return borg8_empty_stub(index);
 
 #ifdef __linux__
-  /* On N64, many "BORG8_" indexed assets are actually Type=1 (textures),
-   * not Type=8 (images).  The 32-bit N64 struct layouts overlapped in a
-   * way that let the Borg8Header cast "work".  On 64-bit Linux the layouts
-   * differ, so we build a proper Borg8Header from the Borg1 data. */
+  /* On N64, loadBorg8 casts Borg1Header* to Borg8Header*, reinterpreting
+   * fields through the 32-bit struct overlay.  On 64-bit Linux, we must
+   * construct a proper Borg8Header from the Borg1 data.
+   *
+   * The N64 Borg8Data overlay at allocation offset 8:
+   *   format(u16) + Width(u16) = Borg1Header.bitmapA (4 bytes on N64)
+   *   Height(u16) + unk06(u16) = Borg1Header.bitmapB (4 bytes on N64)
+   *   palette(u32) = Borg1Header.dat pointer (4 bytes on N64)
+   *   offset(u32) = first 4 bytes of decompressed data (N64 BorgHSize=16)
+   *
+   * We reconstruct these from the raw N64 binary data. */
   s16 listingType = get_borg_listing_type(index);
   if (listingType == 1) {
     Borg1Header *b1 = (Borg1Header *)item;
-    if (b1->dat) {
-      /* Validate: if the parsed Borg1Data fields look invalid, the
-       * borgfile is raw pixel data, not a Borg1 struct.  This happens
-       * for font assets where the decompiled loadBorg8→Borg1 path is
-       * a decompilation error.  Return NULL so the caller can skip. */
-      u16 b1type = b1->dat->type;
-      if (b1type > 8 || (b1->dat->Width == 0 && b1->dat->Height == 0)) {
-        fprintf(stderr, "[loadBorg8] Borg1 index=%u has invalid header (type=%u W=%u H=%u) – raw pixel data, skipping\n",
-                index, b1type, b1->dat->Width, b1->dat->Height);
-        return borg8_empty_stub(index);
-      }
+    if (!b1->dat) return borg8_empty_stub(index);
 
-      Borg8Header *b8;
-      ALLOCS(b8, sizeof(Borg8Header), 35);
-      if (b8) {
-        b8->head = *item;
-        b8->dat.Width  = (u16)b1->dat->Width;
-        b8->dat.Height = (u16)b1->dat->Height;
-        b8->dat.unk06  = 0;
-        static const u16 b1_to_b8[] = {
-          BORG8_RGBA16, BORG8_IA16, BORG8_CI8, BORG8_IA8,
-          BORG8_I8, BORG8_CI4, BORG8_IA4, BORG8_I4, BORG8_RBGA32
-        };
-        b8->dat.format  = (b1type < 9) ? b1_to_b8[b1type] : BORG8_RGBA16;
-        b8->dat.palette = b1->dat->pallette;
-        b8->dat.offset  = (void *)b1->bitmapA;
-        fprintf(stderr, "[loadBorg8] Borg1→Borg8 adapter: index=%u b1type=%u→b8fmt=%u W=%u H=%u bmp=%p pal=%p\n",
-                index, b1type, b8->dat.format, b8->dat.Width, b8->dat.Height,
-                b8->dat.offset, (void*)b8->dat.palette);
-        return b8;
+    u16 b1type = b1->dat->type;
+    if (b1type > 8) return borg8_empty_stub(index);
+
+    Borg8Header *b8;
+    ALLOCS(b8, sizeof(Borg8Header), 35);
+    if (!b8) return borg8_empty_stub(index);
+    b8->head = *item;
+
+    static const u16 b1_to_b8[] = {
+      BORG8_RGBA16, BORG8_IA16, BORG8_CI8, BORG8_IA8,
+      BORG8_I8, BORG8_CI4, BORG8_IA4, BORG8_I4, BORG8_RBGA32
+    };
+
+    /* Use Borg1Data fields for format, palette, and bitmap pointer */
+    b8->dat.format  = (b1type < 9) ? b1_to_b8[b1type] : BORG8_RGBA16;
+    b8->dat.unk06   = 0;
+    b8->dat.palette = b1->dat->pallette;
+    b8->dat.offset  = (void *)b1->bitmapA;
+
+    /* For Width/Height: the Borg1Data W/H are single bytes (max 255),
+     * but the ACTUAL texture dimensions can be larger (e.g., font atlas
+     * 36x414).  On N64, the real dimensions come from the Borg8Data
+     * overlay which reads bitmapA as two u16 values.
+     *
+     * Compute the REAL dimensions from the bitmap size:
+     * bitmap_bytes = total_data_size - bmpOff.
+     * The Borg1Data.Width gives the stride (pixels per row).
+     * Real height = bitmap_bytes / (stride * bytes_per_pixel). */
+    u8 w8 = b1->dat->Width;
+    u8 h8 = b1->dat->Height;
+    u16 realW = (u16)w8;
+    u16 realH = (u16)h8;
+
+    if (b1->bitmapA && b1->dat->bmp) {
+      uintptr_t bmpStart = (uintptr_t)b1->bitmapA;
+      uintptr_t datStart = (uintptr_t)b1->dat;
+      if (bmpStart > datStart) {
+        u32 bmpOff = (u32)(bmpStart - datStart);
+        /* Get the uncompressed size from the listing to compute total data */
+        BorgListing bl;
+        extern void *BorgListingPointer;
+        s32 hdrIdx = b1->head.index;
+        if (hdrIdx >= 0) {
+          ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + hdrIdx * sizeof(BorgListing) + 8),
+                   sizeof(BorgListing), 37);
+          swapBorgListing_img(&bl);
+          u32 totalData = bl.uncompressed;
+          u32 bitmapBytes = (totalData > bmpOff) ? totalData - bmpOff : 0;
+          /* Compute real height from bitmap bytes and width */
+          u32 bpp = 2; /* default RGBA16 */
+          if (b1type == 2 || b1type == 3 || b1type == 4) bpp = 1; /* CI8, IA8, I8 */
+          else if (b1type == 5 || b1type == 6 || b1type == 7) bpp = 1; /* CI4/IA4/I4: 0.5 bpp but stride in bytes */
+          else if (b1type == 8) bpp = 4; /* RGBA32 */
+          if (w8 > 0 && bpp > 0) {
+            u32 computedH = bitmapBytes / (w8 * bpp);
+            if (computedH > h8 && computedH <= 1024) {
+              fprintf(stderr, "[loadBorg8] index=%u: extending height from %u to %u (bitmap=%u bytes, W=%u, bpp=%u)\n",
+                      index, h8, computedH, bitmapBytes, w8, bpp);
+              realH = (u16)computedH;
+            }
+          }
+        }
       }
     }
+
+    b8->dat.Width  = realW;
+    b8->dat.Height = realH;
+
+    fprintf(stderr, "[loadBorg8] Borg1→Borg8: index=%u fmt=%u W=%u H=%u bmp=%p pal=%p\n",
+            index, b8->dat.format, b8->dat.Width, b8->dat.Height,
+            b8->dat.offset, (void*)b8->dat.palette);
+    return b8;
   }
 #endif
 
