@@ -309,11 +309,11 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
   fVar36 = x * sImageHScale;
   uVar1 = (borg8->dat).Width;
   { static int drawLog = 0;
-    if (drawLog < 5) {
-      fprintf(stderr, "[borg8draw] BMP=%p W=%u fmt=%u h=%u xOff=%u v=%u yOff=%u hVis=%u scaleH=%.2f scaleV=%.2f\n",
+    if (drawLog < 3 && BMP != nullptr && (uintptr_t)BMP > 0x40000000) {
+      fprintf(stderr, "[borg8draw] FONT BMP=%p W=%u fmt=%u h=%u xOff=%u v=%u yOff=%u hVis=%u g_before=%p\n",
               BMP, (borg8->dat).Width, (borg8->dat).format,
               (unsigned)h, (unsigned)xOff, (unsigned)v, (unsigned)yOff,
-              hVis, (double)imgXScale, (double)imgYScale);
+              hVis, (void*)g);
       fflush(stderr);
       drawLog++;
     }
@@ -451,6 +451,16 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
     Borg8LoadTextureBlock(g++,BMP,fmt,G_IM_SIZ_8b,borg8->dat.Width,hVis,xOff,yOff,yOff,vVis - 1);
     gSPScisTextureRectangle(g++, sVar28, fVar37, (iVar31 + iVar29), (fVar37 + (float)dVar35 * imgYScale * 4.0f),
      0, 0, 0, dsdx16, dtdy16);
+    { static int ci8Log = 0;
+      if (ci8Log < 3 && BMP != nullptr && (uintptr_t)BMP > 0x40000000) {
+        /* Check what was actually written to the display list */
+        Gfx *check = g - 11; /* approximate: back up to where SETTIMG should be */
+        fprintf(stderr, "[borg8draw] CI8 done: BMP=%p g_after=%p pal=%p iters=%u vVis=%u check_cmd=0x%08x check_addr=0x%08x\n",
+                BMP, (void*)g, (void*)(borg8->dat).palette, iters, vVis,
+                (check >= (g-20)) ? check->w.hi : 0, (check >= (g-20)) ? check->w.lo : 0);
+        ci8Log++;
+      }
+    }
     break;
   case BORG8_CI4:
   case BORG8_IA4:

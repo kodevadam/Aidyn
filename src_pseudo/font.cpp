@@ -339,9 +339,9 @@ LAB_800b4bc4:
                    (iVar15 < (uStack_54 - iVar17))) {
                   { static int pmDraw = 0;
                     if (pmDraw < 3) {
-                      fprintf(stderr, "[font] DRAW: char='%c' kern=%u charH=%u iVar11=%d iVar14=%d iVar15=%d iVar17=%d\n",
-                              *pbVar13, (unsigned)puVar9[bVar10], (unsigned)uStack_54,
-                              iVar11, iVar14, iVar15, iVar17);
+                      Gfx *gBefore = *gg;
+                      fprintf(stderr, "[font] DRAW: char='%c' kern=%u charH=%u g=%p\n",
+                              *pbVar13, (unsigned)puVar9[bVar10], (unsigned)uStack_54, (void*)gBefore);
                       pmDraw++;
                     }
                   }
