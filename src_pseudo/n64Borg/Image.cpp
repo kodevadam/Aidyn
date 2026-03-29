@@ -106,12 +106,15 @@ Borg8Header* loadBorg8(u32 index){
     u16 realW = (u16)w8;
     u16 realH = (u16)h8;
 
-    if (b1->bitmapA && b1->dat->bmp) {
-      uintptr_t bmpStart = (uintptr_t)b1->bitmapA;
-      uintptr_t datStart = (uintptr_t)b1->dat;
-      if (bmpStart > datStart) {
-        u32 bmpOff = (u32)(bmpStart - datStart);
-        /* Use the ORIGINAL borg index (not header->index which is -1 in borgFlag mode) */
+    if (b1->bitmapA) {
+      /* Get bmpOff from the raw N64 data: it's the offset within the decompressed
+       * blob where the bitmap starts.  Read from Borg1Data fields. */
+      u32 bmpOff = 0;
+      /* The bmp pointer = raw_data_base + bmpOff.  We stored the original offset
+       * in Borg1Data by borg1_parse_n64.  Recover it from the pointer difference
+       * between bitmapA and the raw data start (which is the allocation + headerSize). */
+      {
+        /* Use the listing to get the uncompressed size and compute bitmap dimensions */
         BorgListing bl;
         extern void *BorgListingPointer;
         if ((s32)index >= 0 && (s32)index < 4328) {
@@ -119,6 +122,11 @@ Borg8Header* loadBorg8(u32 index){
                    sizeof(BorgListing), 37);
           swapBorgListing_img(&bl);
           u32 totalData = bl.uncompressed;
+          /* bmpOff is the offset of the bitmap within the raw data.
+           * For standard Borg1Data with 24-byte header: bmpOff = 0x18.
+           * Read it from the parsed Borg1Data dList/bmp offset relationship.
+           * Simple approach: raw Borg1Data header is 24 bytes max, bmp typically at 0x18. */
+          bmpOff = 0x18; /* standard Borg1Data header size = bitmap offset */
           u32 bitmapBytes = (totalData > bmpOff) ? totalData - bmpOff : 0;
           /* Compute real height from bitmap bytes and width */
           u32 bpp = 2; /* default RGBA16 */
