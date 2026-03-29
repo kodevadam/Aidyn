@@ -493,10 +493,12 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
   int bitDepth;
 
 #ifdef __linux__
-  /* Parse N64 binary layout into a properly-sized host struct */
-  /* dat_raw is the borgfile blob. We don't know the exact size here,
-   * but getBorgItem allocated listing.uncompressed bytes for it.
-   * Use a reasonable cap to prevent wild pointer creation. */
+  /* Parse N64 binary layout into a properly-sized host struct.
+   * When borgFlag is set, dat_raw is NULL and the data is embedded
+   * right after the header in the combined allocation. */
+  if (!dat_raw) {
+    dat_raw = (Borg1Data *)((u8 *)header + gBorgHeaderSizes[1]);
+  }
   u32 blobSize = 0;
   if (header->head.index >= 0) {
     /* Look up the listing to get the real size */
@@ -540,7 +542,7 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
     header->head.index = -1;
     header->head.unk = 0;
   }
-  return false;
+  return true;
 }
 
 void borg1_free(Borg1Header *param_1){
