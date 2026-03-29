@@ -63,6 +63,10 @@ void TitleSplash::Timer(u16 *stateP,u8 *alpha,u8 *alpha2,u32 ShowTime,u8 *nextP,
 
 void TitleSplash::Init(void){
   SplashLogoModel = BorgAnimLoadScene(BORG5_N64Logo);
+  if (!SplashLogoModel) {
+    fprintf(stderr, "[titlesplash] N64 logo scene failed to load, skipping init\n");
+    return;
+  }
   Scene::SetNearFarPlanes(SplashLogoModel,1.0f,256.0);
   Scene::SetFlag8(SplashLogoModel);
   Scene::SetFlag10(SplashLogoModel);
@@ -251,6 +255,11 @@ u8 TitleSplash::N64Logo(Gfx**GG){
 
   Gfx*g = *GG;
   auStack64 = gGlobals.titleSplashVars.state;
+  if (!SplashLogoModel || !SplashLicence) {
+    /* Assets failed to load — skip the N64 logo display entirely */
+    TitleSplash::Timer(&sSplashN64state,&sSplashN64Alpha,NULL,ShowTime,&auStack64,2);
+    return auStack64;
+  }
   //yeah, sets value directly instead of using setter.
   (SplashLicence->col)={sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha};
   Scene::SetModelTint(SplashLogoModel,sSplashN64Alpha,sSplashN64Alpha,sSplashN64Alpha,0xff);

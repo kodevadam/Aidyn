@@ -42,14 +42,65 @@ void SetBorgListing(void *listing,void *files){
   CLEAR(borg_mem);
   CLEAR(borg_count);
   fprintf(stderr, "[borg] SetBorgListing done, borgTotal=%u\n", borgTotal);
+
+  /* Diagnostic: dump first 5 items AND items 26-31 with raw ROM bytes */
+  for (int di = 0; di <= 31 && di < (int)borgTotal; di++) {
+    if (di > 4 && di < 26) continue; /* skip middle range */
+    BorgListing dl;
+    ROMCOPYS(&dl, (void *)((uintptr_t)listing + di * sizeof(BorgListing) + 8), sizeof(BorgListing), 253);
+    swapBorgListing(&dl);
+    uintptr_t addr = (uintptr_t)files + dl.Offset;
+    u8 raw[16] = {};
+    ROMCOPYS(raw, (void *)addr, 16, 254);
+    fprintf(stderr, "[borg-scan] item %d: Type=%d Comp=%d comp=%u uncomp=%u Off=0x%x "
+            "raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+            di, dl.Type, dl.Compression, dl.compressed, dl.uncompressed, dl.Offset,
+            raw[0],raw[1],raw[2],raw[3],raw[4],raw[5],raw[6],raw[7],
+            raw[8],raw[9],raw[10],raw[11],raw[12],raw[13],raw[14],raw[15]);
+  }
+  /* Fine-grained scan: check ±64KB from current borg_files, every 4 bytes */
+  {
+    BorgListing dl;
+    ROMCOPYS(&dl, (void *)((uintptr_t)listing + 28 * sizeof(BorgListing) + 8), sizeof(BorgListing), 255);
+    swapBorgListing(&dl);
+    u32 itemOffset = dl.Offset;
+    uintptr_t curBase = (uintptr_t)files;
+    fprintf(stderr, "[borg-scan] Fine scan ±64KB from borg_files=0x%lx for item 28 (Off=0x%x)...\n",
+            (unsigned long)curBase, itemOffset);
+    int found = 0;
+    for (s32 delta = -65536; delta <= 65536; delta += 4) {
+      uintptr_t testBase = curBase + delta;
+      uintptr_t testAddr = testBase + itemOffset;
+      u32 testFileOff = (u32)(testAddr - 0x10000000);
+      if (testFileOff + 8 >= 0x2000000) continue;
+      u8 hdr[24];
+      ROMCOPYS(hdr, (void *)testAddr, 24, 257);
+      u16 type = ((u16)hdr[0] << 8) | hdr[1];
+      u8 width = hdr[4];
+      u8 height = hdr[5];
+      if (type <= 8 && width > 0 && height > 0) {
+        u32 bmpOff = ((u32)hdr[12] << 24) | ((u32)hdr[13] << 16) | ((u32)hdr[14] << 8) | hdr[15];
+        /* bmp offset should be within the 2104-byte blob (24 < bmpOff < 2104) */
+        if (bmpOff < 24 || bmpOff > 4096) continue; /* filter noise */
+        fprintf(stderr, "[borg-scan] MATCH: delta=%+d base=0x%lx fileOff=0x%x → type=%u W=%u H=%u bmpOff=0x%x "
+                "raw=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                delta, (unsigned long)testBase, testFileOff, type, width, height, bmpOff,
+                hdr[0],hdr[1],hdr[2],hdr[3],hdr[4],hdr[5],hdr[6],hdr[7],
+                hdr[8],hdr[9],hdr[10],hdr[11],hdr[12],hdr[13],hdr[14],hdr[15]);
+        found++;
+        if (found >= 10) break;
+      }
+    }
+    if (found == 0) fprintf(stderr, "[borg-scan] No matches in ±64KB range\n");
+  }
 }
 
 u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compression){
   u8 *compressedDat;
   u32 auStack40[10];
   auStack40[0]= outSize;
-  fprintf(stderr, "[borg] decompressBorg: src=%p compSize=%u dest=%p outSize=%u compression=%u\n",
-          param_1, compSize, borgfile, outSize, compression);
+  /* fprintf(stderr, "[borg] decompressBorg: src=%p compSize=%u dest=%p outSize=%u compression=%u\n",
+          param_1, compSize, borgfile, outSize, compression); */
   switch(compression){
     case Compress_None:
       ROMCOPYS(borgfile,param_1,compSize,373);
@@ -60,13 +111,88 @@ u8 decompressBorg(void *param_1,u32 compSize,u8 *borgfile,u32 outSize,u32 compre
       decompress_LZ01(compressedDat,compSize,borgfile,auStack40);
       HFREE(compressedDat,397);
       break;
-    case Compress_LZB:
+    case Compress_LZB: {
+      /* LZB back-references can reach BEFORE the output buffer into a
+       * "history" region.  On N64, the heap allocator reuses memory, so
+       * pre-output bytes contain remnants of previous decompressions.
+       * We replicate this by using a PERSISTENT history buffer that
+       * retains data across calls, mimicking N64 heap reuse. */
+      static constexpr u32 LZB_PREFIX = 128u * 1024;
+      static constexpr u32 LZB_SUFFIX = 64u * 1024;
+      static u8 *sPersistentBuf = nullptr;
+      static u32 sPersistentSize = 0;
+      u32 totalNeeded = LZB_PREFIX + outSize + LZB_SUFFIX;
+      if (!sPersistentBuf || sPersistentSize < totalNeeded) {
+        /* Grow the buffer but DON'T free the old one — copy its contents
+         * to preserve the history (like N64 heap reuse). */
+        u8 *newBuf = (u8 *)malloc(totalNeeded);
+        if (!newBuf) { fprintf(stderr, "[borg] LZB malloc(%u) FAILED\n", totalNeeded); break; }
+        if (sPersistentBuf) {
+          /* Copy old history into new buffer's prefix region */
+          u32 copyLen = sPersistentSize < totalNeeded ? sPersistentSize : totalNeeded;
+          memcpy(newBuf, sPersistentBuf, copyLen);
+          free(sPersistentBuf);
+        } else {
+          memset(newBuf, 0, totalNeeded); /* first call: zero-init */
+        }
+        sPersistentBuf = newBuf;
+        sPersistentSize = totalNeeded;
+      }
+      /* Output goes at PREFIX offset — previous decompressions' data
+       * is still in the prefix region, serving as the LZB dictionary. */
       ALLOCS(compressedDat,compSize,407);
+      if (!compressedDat) { fprintf(stderr, "[borg] LZB alloc(%u) FAILED\n", compSize); break; }
       ROMCOPYS(compressedDat,param_1,compSize,411);
-      decompress_LZB(compressedDat,compSize,borgfile,auStack40);
+      s32 lzbRet = decompress_LZB(compressedDat, compSize, sPersistentBuf + LZB_PREFIX, auStack40);
+      if (lzbRet < 0 && lzbRet != -205) {
+        /* -205 means "end marker found but didn't consume all input" — likely trailing
+         * padding, treat as success.  Other negative codes are real failures. */
+        fprintf(stderr, "[borg] LZB decompression FAILED (ret=%d), zeroing output\n", lzbRet);
+        memset(borgfile, 0, outSize);
+        /* persistent buffer not freed */
+        HFREE(compressedDat,421);
+        return false;
+      }
+      if (lzbRet == -205) {
+        fprintf(stderr, "[borg] LZB returned -205 (extra input bytes), treating as OK\n");
+      }
+      /* Check if LZB produced any non-zero output (all-zeros = silent failure) */
+      {
+        u8 *out = sPersistentBuf + LZB_PREFIX;
+        bool allZero = true;
+        for (u32 i = 0; i < outSize && i < 64; i++) {
+          if (out[i] != 0) { allZero = false; break; }
+        }
+        if (allZero && outSize > 0) {
+          fprintf(stderr, "[borg] LZB produced all-zero output (%u bytes), treating as failure\n", outSize);
+          memset(borgfile, 0, outSize);
+          /* persistent buffer not freed */
+          HFREE(compressedDat,421);
+          return false;
+        }
+      }
+      memcpy(borgfile, sPersistentBuf + LZB_PREFIX, outSize);
+      /* Shift the output data into the prefix region so it becomes the
+       * "history" for the next decompression (simulating heap reuse).
+       * Move the entire prefix+output left so the most recent output
+       * occupies the end of the prefix region. */
+      if (outSize < LZB_PREFIX) {
+        memmove(sPersistentBuf, sPersistentBuf + outSize, LZB_PREFIX);
+        memcpy(sPersistentBuf + LZB_PREFIX - outSize, borgfile, outSize);
+      } else {
+        memcpy(sPersistentBuf, borgfile + outSize - LZB_PREFIX, LZB_PREFIX);
+      }
+      /* Dump first 32 bytes of decompressed output for format analysis */
+      {
+        u8 *out = borgfile;
+        u32 n = outSize < 32 ? outSize : 32;
+        fprintf(stderr, "[borg] LZB decompressed first %u bytes:", n);
+        for (u32 i = 0; i < n; i++) fprintf(stderr, " %02x", out[i]);
+        fprintf(stderr, "\n");
+      }
       HFREE(compressedDat,421);
+    }
   }
-  fprintf(stderr, "[borg] decompressBorg done\n");
   return true;
 }
 
@@ -112,32 +238,47 @@ borgHeader * getBorgItem(s32 index){
   s32 memOld;
   borgHeader *ret;
   u8 *borgfile;
-  s32 type;
   u32 size;
   BorgListing listing;
   
   memOld = get_memUsed();
   if ((index >= (s32)borgTotal) || (0 > index)){
-    #if DEBUGVER
-    char errmsg [96];
-    sprintf(errmsg,"item index is out of range (%i/%i)",index,borgTotal - 1);
-    #endif
-    CRASH("n64Borg.cpp, GetBorgItem()",errmsg);
+    fprintf(stderr, "[borg] getBorgItem(%d): index out of range (borgTotal=%u)\n", index, borgTotal);
+    return NULL;
   }
   else{
     ROMCOPYS(&listing,(void *)((uintptr_t)BorgListingPointer + index * sizeof(BorgListing) + 8),sizeof(BorgListing),541);
     swapBorgListing(&listing);
-    fprintf(stderr, "[borg] getBorgItem(%d): Type=%d Compression=%d compressed=%u uncompressed=%u Offset=0x%x\n",
-            index, listing.Type, listing.Compression, listing.compressed, listing.uncompressed, listing.Offset);
+    {
+      uintptr_t romAddr = (uintptr_t)borgFilesPointer + listing.Offset;
+      uintptr_t fileOff = romAddr - 0x10000000;
+      fprintf(stderr, "[borg] getBorgItem(%d): Type=%d Compression=%d compressed=%u uncompressed=%u "
+              "Offset=0x%x romAddr=0x%lx fileOff=0x%lx\n",
+              index, listing.Type, listing.Compression, listing.compressed, listing.uncompressed,
+              listing.Offset, (unsigned long)romAddr, (unsigned long)fileOff);
+    }
     if ((((listing.Type < 3) || (listing.Type == 6)) || (listing.Type == 11)) || (((listing.Type == 12 || (listing.Type == 13)) || (listing.Type == 14)))) {
       if (borgFlag == 0) {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),561);
+        if (ret) memset(ret, 0, gBorgHeaderSizes[listing.Type] + sizeof(void*));
         if (gBorgBytes[index] == 0) {
           ALLOCS(borgfile,listing.uncompressed,566);
-          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
-                         borgfile,listing.uncompressed,(s32)listing.Compression);
+          if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+                         borgfile,listing.uncompressed,(s32)listing.Compression)) {
+            fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+            HFREE(borgfile,567); HFREE(ret,568); return NULL;
+          }
           fprintf(stderr, "[borg] calling borg_funcs_a[%d] on borgfile=%p\n", listing.Type, borgfile);
+#ifdef __linux__
+          if (listing.Type == 1)
+            (*borg_funcs_a[listing.Type])(borgfile);
+          else {
+            fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux (non-borgFlag fresh)\n", index, listing.Type);
+            HFREE(borgfile,567); HFREE(ret,568); return NULL;
+          }
+#else
           (*borg_funcs_a[listing.Type])(borgfile);
+#endif
           gBorgpointers[index] = (borgHeader*)borgfile;
           gBorgBytes[index] = 1;
         }
@@ -150,27 +291,77 @@ borgHeader * getBorgItem(s32 index){
       }
       else {
         ALLOCS(ret,gBorgHeaderSizes[listing.Type] + sizeof(void*),600);
+        if (ret) memset(ret, 0, gBorgHeaderSizes[listing.Type] + sizeof(void*));
         ALLOCS(borgfile,listing.uncompressed,602);
-        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
-                       listing.uncompressed,(s32)listing.Compression);
+        if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,borgfile,
+                       listing.uncompressed,(s32)listing.Compression)) {
+          fprintf(stderr, "[borg] decompression failed for index %d, skipping\n", index);
+          HFREE(borgfile,603); HFREE(ret,604); return NULL;
+        }
+#ifdef __linux__
+        /* On Linux, skip N64 pointer fixup (func_a) — the blob data uses
+         * 32-bit N64 pointer layout which is incompatible with 64-bit.
+         * borg1 has its own borg1_parse_n64 path; others are stubbed. */
+        if (listing.Type == 1) /* borg1 has Linux-specific parsing */
+          (*borg_funcs_a[listing.Type])(borgfile);
+        else {
+          /* Non-type-1 items: func_a skipped, func_b depends on func_a.
+           * Return NULL so callers use their NULL guards. */
+          fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux\n", index, listing.Type);
+          if (borgFlag) { HFREE(ret,605); }
+          else { HFREE(borgfile,605); HFREE(ret,606); }
+          return NULL;
+        }
+#else
         (*borg_funcs_a[listing.Type])(borgfile);
+#endif
         gBorgpointers[index] = NULL;
         gBorgBytes[index] = 0;
         ret->index = -1;
         ret->unk = 0;
       }
-      (*borg_funcs_b[listing.Type])(ret,borgfile);
+      if (!(*borg_funcs_b[listing.Type])(ret,borgfile)) {
+        /* borg_funcs_b (e.g. InitBorgTexture) returned failure — invalid header/data.
+         * Free everything and return NULL so callers know the asset is unusable. */
+        fprintf(stderr, "[borg] borg_funcs_b[%d] failed for index %d, returning NULL\n", listing.Type, index);
+        if (borgFlag) { HFREE(borgfile,605); }
+        HFREE(ret,606);
+        return NULL;
+      }
     }
     else {
       if (borgFlag){
-        size = gBorgHeaderSizes[type] + listing.uncompressed;
+        size = gBorgHeaderSizes[listing.Type] + listing.uncompressed;
         ALLOCS(ret,size,627);
+        if (!ret) { fprintf(stderr, "[borg] alloc failed for index %d, skipping\n", index); return NULL; }
         bzero(ret,size);
-        decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+        if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                        (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
-                       (s32)listing.Compression);
+                       (s32)listing.Compression)) {
+          fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping. ret=%p\n", index, listing.Type, (void*)ret);
+          fflush(stderr);
+          HFREE(ret,628);
+          fprintf(stderr, "[borg] freed ret for index %d, returning NULL\n", index);
+          fflush(stderr);
+          return NULL;
+        }
+        fprintf(stderr, "[borg] index %d Type=%d: calling borg_funcs_a/b\n", index, listing.Type);
+#ifdef __linux__
+        if (listing.Type == 1) {
+          /* In borgFlag mode, ret is the combined header+data allocation.
+           * func_a would parse the header bytes as N64 data (wrong).
+           * Skip func_a — func_b (InitBorgTexture) handles parsing
+           * correctly by computing data offset from header. */
+          (*borg_funcs_b[listing.Type])(ret,0);
+        } else {
+          fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux (borgFlag)\n", index, listing.Type);
+          HFREE(ret,628);
+          return NULL;
+        }
+#else
         (*borg_funcs_a[listing.Type])(ret);
         (*borg_funcs_b[listing.Type])(ret,0);
+#endif
         gBorgpointers[index] = NULL;
         gBorgBytes[index] = 0;
         ret->index = -1;
@@ -178,12 +369,16 @@ borgHeader * getBorgItem(s32 index){
       }
       else {
         if (!gBorgBytes[index]) {
-          size = gBorgHeaderSizes[type] + listing.uncompressed;
+          size = gBorgHeaderSizes[listing.Type] + listing.uncompressed;
           ALLOCS(ret,size,653);
+          if (!ret) { fprintf(stderr, "[borg] alloc failed for index %d, skipping\n", index); return NULL; }
           bzero(ret,size);
-          decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
+          if (!decompressBorg((void *)((uintptr_t)borgFilesPointer + listing.Offset),listing.compressed,
                          (u8 *)((uintptr_t)ret + gBorgHeaderSizes[listing.Type]),listing.uncompressed,
-                         (s32)listing.Compression);
+                         (s32)listing.Compression)) {
+            fprintf(stderr, "[borg] decompression failed for index %d (Type=%d), skipping\n", index, listing.Type);
+            HFREE(ret,654); return NULL;
+          }
           (*borg_funcs_a[listing.Type])(ret);
           (*borg_funcs_b[listing.Type])(ret,0);
           gBorgpointers[index] = ret;
@@ -199,8 +394,11 @@ borgHeader * getBorgItem(s32 index){
     }
     borg_mem[listing.Type]+= (get_memUsed() - memOld);
     borg_count[listing.Type]++;
+    fprintf(stderr, "[borg] getBorgItem(%d) returning %p (Type=%d)\n", index, (void*)ret, listing.Type);
     return ret;
   }
+  fprintf(stderr, "[borg] getBorgItem(%d) returning NULL (fell through)\n", index);
+  return NULL;
 }
 
 //based on older builds, would originally print out memory used by category of Borg
@@ -240,29 +438,138 @@ void Ofunc_borg0_free(void**param_1){
 
 void * Ofunc_getborg(s32 param_1){
   clearBorgFlag();
-  return **(void ***)((s32)getBorgItem(param_1) + 8);}
+  borgHeader *item = getBorgItem(param_1);
+  if (!item) return nullptr;
+  return **(void ***)((uintptr_t)item + 8);
+}
 
 //"borg1" is textures.
+
+#ifdef __linux__
+/* N64 Borg1Data disk layout (24 bytes with 4-byte pointers):
+ *   0: u16 type, 2: u16 flag, 4: u8 Width, 5: u8 Height,
+ *   6: u8 lods, 7: u8 move, 8: u32 dList_off, 12: u32 bmp_off,
+ *   16: u32 pallette_off, 20: u32 unk14
+ * Host Borg1Data has 8-byte pointers so it can't overlay the raw data.
+ * Parse the N64 binary, allocate a host-layout Borg1Data, and resolve
+ * the 32-bit offsets into real pointers. */
+static Borg1Data *borg1_parse_n64(u8 *raw, u32 rawSize) {
+    if (rawSize < 24) {
+        fprintf(stderr, "[borg1_parse] blob too small (%u bytes, need 24)\n", rawSize);
+        return nullptr;
+    }
+
+    fprintf(stderr, "[borg1_parse] raw first 24 bytes: "
+            "%02x %02x %02x %02x %02x %02x %02x %02x "
+            "%02x %02x %02x %02x %02x %02x %02x %02x "
+            "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+            raw[0],raw[1],raw[2],raw[3],raw[4],raw[5],raw[6],raw[7],
+            raw[8],raw[9],raw[10],raw[11],raw[12],raw[13],raw[14],raw[15],
+            raw[16],raw[17],raw[18],raw[19],raw[20],raw[21],raw[22],raw[23]);
+
+    Borg1Data *d;
+    ALLOCS(d, sizeof(Borg1Data), 258);
+    if (!d) return nullptr;
+
+    u16 type_raw, flag_raw;
+    memcpy(&type_raw, raw + 0, 2);
+    memcpy(&flag_raw, raw + 2, 2);
+    d->type     = be16(type_raw);
+    d->flag     = be16(flag_raw);
+    d->Width    = raw[4];
+    d->Height   = raw[5];
+    d->lods     = raw[6];
+    d->move     = raw[7];
+
+    /* Validate: type must be a known BORG1type (0-8) */
+    if (d->type > 8) {
+        fprintf(stderr, "[borg1_parse] INVALID type=%u (raw bytes: %02x %02x) — not a Borg1Data header\n",
+                d->type, raw[0], raw[1]);
+        HFREE(d, 259);
+        return nullptr;
+    }
+
+    u32 off_dList, off_bmp, off_pal, unk14;
+    memcpy(&off_dList, raw + 8,  4);
+    memcpy(&off_bmp,   raw + 12, 4);
+    memcpy(&off_pal,   raw + 16, 4);
+    memcpy(&unk14,     raw + 20, 4);
+    off_dList = be32(off_dList);
+    off_bmp   = be32(off_bmp);
+    off_pal   = be32(off_pal);
+    d->unk14  = be32(unk14);
+
+    /* Bounds-check: offsets must be within the blob, not wild pointers */
+    d->dList    = (off_dList && off_dList < rawSize) ? (Gfx *)(raw + off_dList) : nullptr;
+    d->bmp      = (off_bmp   && off_bmp   < rawSize) ? (u8  *)(raw + off_bmp)  : nullptr;
+    d->pallette = (off_pal   && off_pal   < rawSize) ? (u16 *)(raw + off_pal)   : nullptr;
+
+    if (off_dList >= rawSize || off_bmp >= rawSize || off_pal >= rawSize) {
+        fprintf(stderr, "[borg1_parse] WARNING: offset(s) out of bounds (blobSize=%u): "
+                "dList=0x%x bmp=0x%x pal=0x%x\n", rawSize, off_dList, off_bmp, off_pal);
+    }
+
+    fprintf(stderr, "[borg1_parse] parsed: type=%u flag=0x%x W=%u H=%u "
+            "dList_off=0x%x bmp_off=0x%x pal_off=0x%x\n",
+            d->type, d->flag, d->Width, d->Height, off_dList, off_bmp, off_pal);
+
+    return d;
+}
+
+void borg1_func_a(Borg1Data *param_1){
+    /* On Linux the fixup is done in InitBorgTexture via borg1_parse_n64.
+     * Skip the in-place SetPointer calls which would read wrong offsets
+     * from the 64-bit struct overlay. */
+}
+#else
 void borg1_func_a(Borg1Data *param_1){
   CheckSetPointer(param_1,dList);
   CheckSetPointer(param_1,bmp);
   CheckSetPointer(param_1,pallette);
 }
+#endif
 
-u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat){
-  u16 uVar1;
+u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
   Borg1Data *pBVar2;
   u32 size;
   u8 *puVar5;
   int bitDepth;
-  
+
+#ifdef __linux__
+  /* Parse N64 binary layout into a properly-sized host struct.
+   * When borgFlag is set, dat_raw is NULL and the data is embedded
+   * right after the header in the combined allocation. */
+  if (!dat_raw) {
+    dat_raw = (Borg1Data *)((u8 *)header + gBorgHeaderSizes[1]);
+  }
+  u32 blobSize = 0;
+  if (header->head.index >= 0) {
+    /* Look up the listing to get the real size */
+    BorgListing bl;
+    extern void *BorgListingPointer;
+    ROMCOPYS(&bl, (void *)((uintptr_t)BorgListingPointer + header->head.index * sizeof(BorgListing) + 8),
+             sizeof(BorgListing), 440);
+    swapBorgListing(&bl);
+    blobSize = bl.uncompressed;
+  }
+  if (blobSize == 0) blobSize = 65536; /* fallback cap */
+  Borg1Data *dat = borg1_parse_n64((u8 *)dat_raw, blobSize);
+  if (!dat) return false;
+#else
+  Borg1Data *dat = dat_raw;
+#endif
+
   header->dat = dat;
+  fprintf(stderr, "[borg1] InitBorgTexture: idx=%d type=%u flag=0x%x W=%u H=%u bmp=%p pal=%p dList=%p\n",
+          header->head.index,
+          dat->type, dat->flag, dat->Width, dat->Height,
+          (void*)dat->bmp, (void*)dat->pallette, (void*)dat->dList);
   if (!(dat->flag & B1_Procedural)) {
     header->bitmapA = header->bitmapB = dat->bmp;
   }
   else {
     bitDepth = 2;
-    if (B1_RGBA16 <= dat->type) {
+    if (B1_RGBA16 < dat->type) {  /* original was probably strict < (decompiler showed <=, but 0<=type is always true) */
       if (dat->type == B1_RGBA32) bitDepth=4;
       else CRASH("n64Borg.cpp, InitBorgTexture()",
           "Procedural flag on a texture type other than 32B_RGBA,16B_RGBA/IA!");
@@ -279,7 +586,7 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat){
     header->head.index = -1;
     header->head.unk = 0;
   }
-  return false;
+  return true;
 }
 
 void borg1_free(Borg1Header *param_1){
@@ -297,10 +604,15 @@ void borg1_free(Borg1Header *param_1){
 "vertices and display lists; for whatever stupid reason they only used tri1 cmds"
 -Zoinkity*/
 void borg2_func_a(Borg2Data *param_1){
+#ifdef __linux__
+  /* Borg2 pointer fixup uses N64 32-bit struct layout. Skip on Linux. */
+  fprintf(stderr, "[borg2] borg2_func_a: skipping pointer fixup on Linux\n");
+  return;
+#else
   int *piVar1;
   int *piVar3;
   int iVar4;
-  
+
 
   SetPointer(param_1,dsplists);
   SetPointer(param_1,vertlist);
@@ -327,6 +639,7 @@ void borg2_func_a(Borg2Data *param_1){
       piVar3 = piVar3 + 2;
     }
   }
+#endif
 }
 
 u8 borg2_func_b(Borg2Header *param_1,Borg2Data *param_2){

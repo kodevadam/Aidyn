@@ -35,8 +35,10 @@ Gfx * WidgetBorg8::Render(Gfx *g,u16 x0,u16 y0,u16 x1,u16 y1){
     s16 iWidth = (this->borg8->dat).Height;
     s16 iVar14 = (this->width + this->posX);
     s16 iVar8 = (this->height + this->posY);
-    float iScaleX = this->width / (this->borg8->dat).Width;
-    float iScaleY = this->height / (this->borg8->dat).Height;
+    u16 texW = (this->borg8->dat).Width  ? (this->borg8->dat).Width  : 1;
+    u16 texH = (this->borg8->dat).Height ? (this->borg8->dat).Height : 1;
+    float iScaleX = this->width / texW;
+    float iScaleY = this->height / texH;
     u16 bx0 = this->boundX0;
     if (this->boundX0 < x0) bx0 = x0;
     u16 bx1 = this->boundX1;

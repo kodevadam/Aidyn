@@ -141,9 +141,12 @@ void AppProc(void *x){
           Gsprintf("HandleAppFrame()");
           gGlobals.ticker++;
           if (doubleGlobalTickerFlag == 1) gGlobals.ticker++;
+          fprintf(stderr, "[app] calling appProc_caseSwitch (appstate=%d)\n", gGlobals.appstate);
           gfx1 = appProc_caseSwitch(gfx0);
+          fprintf(stderr, "[app] caseSwitch returned, gfx1=%p (appstate now=%d)\n", (void*)gfx1, gGlobals.appstate);
           #if DEBUGVER //print detailed debug stats in Debug version
           gfx1 = display_debug_stats(gfx1);
+          fprintf(stderr, "[app] debug_stats returned gfx1=%p\n", (void*)gfx1);
           #else //print just player coords if Retail Version and !version cheat used
           if ((version_flag) && (gPlayer)) {
             Gsprintf("%c%02d-(%2.1f,%2.1f)\n",gGlobals.gameVars.mapShort1 + ('A'-1)
@@ -155,18 +158,22 @@ void AppProc(void *x){
           void* x;
           NOOP_800a2448(x);
           gfx1 = ret_A0(gfx1);
+          fprintf(stderr, "[app] calling EndList\n");
           gfx1 = Graphics::EndList(gfx1);
           gListSizeMax = 0x3200;
           if (gExpPakFlag) gListSizeMax = 0x6400;
-          uVar10 = (u32)((int)gfx1 - (int)gfx0) /sizeof(Gfx);
-          if (gListSizeMax*sizeof(Gfx) < (u32)(gfx1 - (int)gfx0)) {
+          uVar10 = (u32)(gfx1 - gfx0);  /* pointer difference in Gfx units */
+          if (uVar10 > gListSizeMax) {
             Gsprintf("GLIST OVERWRITE!!\nCurrent: %lu\nAllocated: %lu\nOverwrite: %lu",uVar10,gListSizeMax,
                         uVar10 - gListSizeMax);
             CRASH("app.cpp::AppProc",gGlobals.text);
           }
           if (doubleGlobalTickerFlag)doubleGlobalTickerFlag--;
           else {
-            osSendMesg(appManager.MesgQ,Graphics::CreateTask(gfx1,&appManager.MesgQ2),1);
+            { OSScTask *t = Graphics::CreateTask(gfx1,&appManager.MesgQ2);
+              fprintf(stderr, "[app] Sending task %p to sched cmdQ\n", (void*)t);
+              osSendMesg(appManager.MesgQ, (OSMesg)t, 1);
+              fprintf(stderr, "[app] Task sent OK\n"); }
             sVar9++;
           }
          }
@@ -214,7 +221,7 @@ void appProc_init(void){
   Font::Init(gGlobals.font,i);
   if (0 < i) {
     for(;i!=0;i--){
-      FontFace *f=&font_face[i];
+      FontFace *f=&font_face[i-1];
       Font::LoadFace(gGlobals.font,f->borg8,f->rows,f->cols);
     }
   }

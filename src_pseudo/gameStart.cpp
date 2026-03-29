@@ -30,8 +30,20 @@ void flycam_func(void){
   gGlobals.brightness = 0.0;
   gGlobals.screenFadeMode = ScreenFade_In;
   gGlobals.screenFadeSpeed = (2.0/30);
+#ifdef __linux__
+  /* Borg6 (animation) assets can't load on Linux yet — skip flycam setup */
+  gFlycamBorg6P = NULL;
+  gFlycamSceneP = NULL;
+  return;
+#endif
   gFlycamBorg6P = loadBorg6(gFlycamSequences[flycam_counter].borg6);
+  if (!gFlycamBorg6P || !gFlycamBorg6P->dat) {
+    fprintf(stderr, "[gameStart] flycam borg6 failed to load, skipping scene setup\n");
+    gFlycamSceneP = NULL;
+    return;
+  }
   gFlycamSceneP = BorgAnimLoadScene(gFlycamBorg6P->dat->borg5);
+  if (!gFlycamSceneP) return;
   Scene_SetBorg6(gFlycamSceneP,gFlycamBorg6P);
   Scene::SetFlag10(gFlycamSceneP);
 }
@@ -55,6 +67,12 @@ Gfx * RenderFlycam(Gfx *gfx){
   if (!gFlycamSceneP) {
     if ((gGlobals.QueueA.items == 0) && (gGlobals.brightness == 0.0)) {
       flycam_func();
+      if (!gFlycamSceneP) {
+        /* Scene failed to load — skip flycam entirely, just hold brightness at 1 */
+        gGlobals.brightness = 1.0f;
+        gGlobals.screenFadeMode = ScreenFade_None;
+        return apGStackX_0[0];
+      }
       gGlobals.screenFadeMode = ScreenFade_In;
       gGlobals.screenFadeSpeed = 0.01f;
       gfx = apGStackX_0[0];
@@ -199,6 +217,11 @@ void TitleScreenInput(void){
     }
   }
   gGlobals.delta = (float)uVar3;
+#ifdef __linux__
+  /* On Linux, the controller thread may not be feeding input.
+   * Ensure delta is always at least 1 so the game logic advances. */
+  if (gGlobals.delta < 1.0f) gGlobals.delta = 1.0f;
+#endif
 }
 
 

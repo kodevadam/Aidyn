@@ -319,10 +319,12 @@ static void *sched_thread(void *arg) {
         }
         pthread_mutex_unlock(&sc->mutex);
 
-        /* Check for pending graphics tasks from the game thread.
-         * The game sends OSScTask* via osSendMesg to sc->mq (the command queue).
-         * We read it here and post it for the main thread (GL owner) to render. */
+        /* Check for pending graphics tasks from the game thread. */
         OSMesg taskMsg = nullptr;
+        s32 qSize = (s32)sc->mq.msgs.size();
+        if (qSize > 0 || sc->frameCount <= 3) {
+            fprintf(stderr, "[sched] frame=%u checking cmdQ (size=%d)\n", sc->frameCount, qSize);
+        }
         while (osRecvMesg(&sc->mq, &taskMsg, OS_MESG_NOBLOCK) == 0) {
             auto *task = static_cast<OSScTask *>(taskMsg);
             fprintf(stderr, "[sched] Got task %p from command queue\n", (void*)task);
@@ -421,7 +423,8 @@ extern "C" s32 osContInit(OSMesgQueue *mq, u8 *bitpattern, OSContStatus *data) {
 }
 
 extern "C" s32 osContStartReadData(OSMesgQueue *mq) {
-    (void)mq;
+    /* Post completion so the caller's osRecvMesg(mq) doesn't block */
+    if (mq) osSendMesg(mq, nullptr, OS_MESG_NOBLOCK);
     return 0;
 }
 
@@ -430,9 +433,19 @@ extern "C" void osContGetReadData(OSContPad *data) {
 }
 
 extern "C" s32 osContSetCh(u8 ch) { (void)ch; return 0; }
-extern "C" s32 osContStartQuery(OSMesgQueue *mq) { (void)mq; return 0; }
+extern "C" s32 osContStartQuery(OSMesgQueue *mq) {
+    /* Post completion so the caller's osRecvMesg(mq) doesn't block */
+    if (mq) osSendMesg(mq, nullptr, OS_MESG_NOBLOCK);
+    return 0;
+}
 extern "C" void osContGetQuery(OSContStatus *data) {
-    if (data) memset(data, 0, sizeof(OSContStatus) * MAXCONTROLLERS);
+    if (data) {
+        memset(data, 0, sizeof(OSContStatus) * MAXCONTROLLERS);
+        /* Report port 0 as a standard controller so the game doesn't
+         * show "no controller" warnings.  Real input comes via SDL. */
+        data[0].type = CONT_TYPE_NORMAL;
+        data[0].errno_ = 0;
+    }
 }
 
 /* Controller Pak / rumble stubs */

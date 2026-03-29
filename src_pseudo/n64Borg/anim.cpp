@@ -1078,12 +1078,15 @@ SceneData * BorgAnimLoadScene(u32 borg_5){
   CLEAR(ret);
   ret->locatorScene1 = NULL;
   ret->locatorScene2 = NULL;
+  fprintf(stderr, "[borg] BorgAnimLoadScene(%u): entering\n", borg_5);
   setBorgFlag();
   b5 = (Borg5Header *)getBorgItem(borg_5);
+  fprintf(stderr, "[borg] BorgAnimLoadScene(%u): getBorgItem returned %p\n", borg_5, (void*)b5);
   ret->borg5 = b5;
   if (b5 == NULL) {
+    fprintf(stderr, "[borg] BorgAnimLoadScene(%u): getBorgItem returned NULL, skipping\n", borg_5);
     HFREE(ret,2779);
-    CRASH("BorgAnimLoadScene","GetBorgItem failed");
+    return NULL;
   }
   ret->sceneTicked = false;
   ret->flags = 0;
@@ -1131,6 +1134,7 @@ LAB_8009fb4c:
 }
 
 void borganim_free(SceneData *param_1){
+  if (!param_1) return;
   borg5_free(param_1->borg5);
   HFREE(param_1,2870);
 }
@@ -1145,15 +1149,25 @@ void passto_borg_6_free(Borg6Header *param_1){borg_6_free(param_1);}
 Borg7Header * loadBorg7(u32 index,ParticleHeadStruct *param_2){
   setBorgFlag();
   Borg7Header *ret = (Borg7Header *)getBorgItem(index);
-  if ((ret->dat).subCount){
-    ret->sceneDat = BorgAnimLoadScene(ret->unk18->b6->dat->borg5);
+  if (!ret) {
+    fprintf(stderr, "[anim] loadBorg7: getBorgItem(%u) returned NULL\n", index);
+    return NULL;
   }
-  ret->sceneDat->particleHead = param_2;
-  Borg7_StartParticles(ret);
+  if ((ret->dat).subCount){
+    if (ret->unk18 && ret->unk18->b6 && ret->unk18->b6->dat)
+      ret->sceneDat = BorgAnimLoadScene(ret->unk18->b6->dat->borg5);
+    else
+      ret->sceneDat = NULL;
+  }
+  if (ret->sceneDat) {
+    ret->sceneDat->particleHead = param_2;
+    Borg7_StartParticles(ret);
+  }
   return ret;
 }
 
 void FUN_8009fca8(Borg7Header *param_1){
+  if (!param_1) return;
   if (param_1->sceneDat)
     Particle::UnsetSceneEmmiter(param_1->sceneDat->particleHead,param_1->sceneDat);
   for(s32 i=0;i<param_1->dat.subCount;i++){

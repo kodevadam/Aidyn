@@ -244,6 +244,12 @@ BaseWidget * IntroMenu_ShadowBG(s16 x0,s16 y0,s16 x1,s16 y1) {
 
 
 void IntroMenu::InitTitleCard() {
+#ifdef __linux__
+  /* Skip title card (compressed borg8 images fail) and go directly to
+   * the start game menu, which uses FONT text (item 28, uncompressed). */
+  ShowStartGameMenu();
+  return;
+#endif
   BaseWidget *pBVar2;
   IntroMenuSub *sub = (IntroMenuSub *)this->substruct;
   sub->unk20 = sub->unk1c;

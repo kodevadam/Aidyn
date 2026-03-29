@@ -83,6 +83,10 @@ u8 Font::LoadFace(FontStruct *fontP,u32 b8,u8 rows,u8 cols){
   u16 *puVar5;
   FontSubstruct *pFVar7;
   
+  if (rows == 0 || cols == 0) {
+    fprintf(stderr, "[font] LoadFace: rows=%u cols=%u – refusing divide-by-zero\n", rows, cols);
+    return false;
+  }
   if (fontP->fontsLoaded < fontP->fontTotal) {
     if (fontP->fontsLoaded == 0) fontP->fontIndex = 0;
     bVar6 = fontP->fontsLoaded + 1;
@@ -94,8 +98,13 @@ u8 Font::LoadFace(FontStruct *fontP,u32 b8,u8 rows,u8 cols){
       pFVar7->borgP = pBVar4;
       pBVar4 = fontP->currFont;
       uVar1 = (pBVar4->dat).Width;
-      pFVar7->borgW = uVar1;
       uVar2 = (pBVar4->dat).Height;
+      if (uVar1 == 0 || uVar2 == 0 || !(pBVar4->dat).offset) {
+        fprintf(stderr, "[font] LoadFace: borg %u has invalid dimensions W=%u H=%u offset=%p – skipping\n",
+                b8, uVar1, uVar2, (pBVar4->dat).offset);
+        return false;
+      }
+      pFVar7->borgW = uVar1;
       pFVar7->borgIndex = b8;
       pFVar7->borgH = uVar2;
       pFVar7->charW = uVar1 / cols;
@@ -159,7 +168,7 @@ int Font::printSimple(FontStruct *fontP,Gfx **gg,char *txt,int x,int y,float sca
   sVar4 = fontP->charW;
   sVar5 = fontP->charH;
   xCurr = x;
-  if ((fontP->currFont != NULL) && (*txt)) {
+  if ((fontP->currFont != NULL) && fontP->kerning && (*txt)) {
     bVar1 = *txt;
     while( true ) {
       if (bVar1 == '\n') {
@@ -250,7 +259,7 @@ int Font::PrintMain(FontStruct *font,Gfx **gg,char *txt,int posX,int posY,s16 pa
   uStack_58 = (u16)font->charW;
   iVar11 = 0;
   uStack_54 = (u16)font->charH;
-  if ((((font->currFont == NULL) || (iStack_64 <= param_6)) ||
+  if ((((font->currFont == NULL) || (font->kerning == NULL) || (iStack_64 <= param_6)) ||
       (param_10 <= param_8)) || (param_11 <= param_9)) {
     iStack_5c = 0;
   }
@@ -412,7 +421,7 @@ void Font::PrintChara(FontStruct *fontP,Gfx **gg,u8 chara,s32 param_4,int param_
   uVar4 = fontP->charH;
   iVar11 = 0;
 
-  if (fontP->currFont == NULL) return;
+  if (fontP->currFont == NULL || fontP->kerning == NULL) return;
   if (bVar1 == '+') return;
   if (chara == '\n') return;
   if (param_5 < param_7) {
@@ -463,7 +472,7 @@ int Font::GetWidth(FontStruct *param_1,char *txt){
 
 int Font::GetWidthScaled(FontStruct *font,char *txt,float scale){
   int w = 0;
-  if (font->currFont) {
+  if (font->currFont && font->kerning) {
     while(*txt) {
       u8 c = *txt;
       if ((struct_unk_.textIndexies[c - ' '] != 43) && (c != '\n'))
@@ -477,7 +486,7 @@ int Font::GetWidthScaled(FontStruct *font,char *txt,float scale){
 
 
 u16 Font::GetCharWidth(FontStruct *param_1,u8 chara){
-  if (param_1->currFont == NULL) return 0;
+  if (param_1->currFont == NULL || param_1->kerning == NULL) return 0;
   if ((struct_unk_.textIndexies[chara - ' '] != 43) && (chara != '\n')) {
     return param_1->kerning[struct_unk_.textIndexies[chara - ' ']];
   }
@@ -486,7 +495,7 @@ u16 Font::GetCharWidth(FontStruct *param_1,u8 chara){
 
 
 int Font::GetCharWidthScaled(FontStruct *param_1,char chara,float scale){
-  if (param_1->currFont == NULL) return 0;
+  if (param_1->currFont == NULL || param_1->kerning == NULL) return 0;
   if ((struct_unk_.textIndexies[(u8)chara - ' '] != 43) && (chara != '\n')) {
     return (param_1->kerning[struct_unk_.textIndexies[(u8)chara - ' ']] * scale);
   }
@@ -513,7 +522,7 @@ int Font::GetHeightScaled(FontStruct *font,char *str,int h,int w,float scaleX,fl
   
   iVar8 = 0;
   iVar4 = 0;
-  if ((font->currFont != NULL) && (str != NULL)) {
+  if ((font->currFont != NULL) && font->kerning && (str != NULL)) {
     if (w <= h) return 0;
     if (*str != '\0') {
       iVar9 = ((u16)font->charH * scaleY + 2.0f);
@@ -575,6 +584,9 @@ LAB_800b5474:
 
 //scan image for character sizes
 u8 Font::SetupBorg8(FontStruct *font,Borg8Header *param_2,u16 *sizes,u16 rows,u16 cols){
+  fprintf(stderr, "[font] SetupBorg8: W=%u H=%u fmt=%u offset=%p pal=%p rows=%u cols=%u sizes=%p\n",
+          (param_2->dat).Width, (param_2->dat).Height, (param_2->dat).format,
+          (param_2->dat).offset, (void*)(param_2->dat).palette, rows, cols, (void*)sizes);
   u8 uVar1;
   u16 uVar3;
   u32 charW;

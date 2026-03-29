@@ -27,7 +27,7 @@ u8 FUN_8001b9bc(voxelObject *param_1,Borg9Data*map){
 }
 
 void set_refObj_flag(voxelObject *param_1){
-  setEventFlag((param_1->header).flagB,(bool)(((param_1->header).Bitfeild >> 9) & 1 ^ 1));
+  setEventFlag((param_1->header).flagB,(bool)((((param_1->header).Bitfeild >> 9) & 1) ^ 1));
 }
 
 

@@ -585,211 +585,390 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 /* _DW – N64 SDK statement-wrapper macro (passes its argument through) */
 #define _DW(x) x
 
-/* Helper – write a stub command (caller advances the pointer via gdl++) */
-#define _GBI_NOP(gdl) do { (gdl)->w.hi = 0; (gdl)->w.lo = 0; } while(0)
-
-/* Static initializer version (for Gfx array literals) */
-#define _GBI_SNOP() {0}
-
-/* --- Pipeline state --- */
-#define gDPPipeSync(gdl)             _GBI_NOP(gdl)
-#define gDPFullSync(gdl)             _GBI_NOP(gdl)
-#define gDPTileSync(gdl)             _GBI_NOP(gdl)
-#define gDPLoadSync(gdl)             _GBI_NOP(gdl)
-#define gDPNoOp(gdl)                 _GBI_NOP(gdl)
-
-/* --- Display list control --- */
-#define gSPNoOp(gdl)                 _GBI_NOP(gdl)
-#define gSPEndDisplayList(gdl)       _GBI_NOP(gdl)
-#define gSPDisplayList(gdl, dl)      _GBI_NOP(gdl)
-#define gSPBranchList(gdl, dl)       _GBI_NOP(gdl)
-
-/* --- Matrix --- */
-#define gSPMatrix(gdl, m, p)         _GBI_NOP(gdl)
-#define gSPPopMatrix(gdl, p)         _GBI_NOP(gdl)
-#define gSPLoadMatrix(gdl, m)        _GBI_NOP(gdl)
-#define gSPInsertMatrix(gdl, ...)    _GBI_NOP(gdl)
-#define gSPForceMatrix(gdl, mptr)    _GBI_NOP(gdl)
-
-/* --- Viewport --- */
-#define gSPViewport(gdl, vp)         _GBI_NOP(gdl)
-
-/* --- Vertex / triangle --- */
-#define gSPVertex(gdl, v, n, idx)    _GBI_NOP(gdl)
-#define gSP1Triangle(gdl, ...)       _GBI_NOP(gdl)
-#define gSP2Triangles(gdl, ...)      _GBI_NOP(gdl)
-#define gSP4Triangles(gdl, ...)      _GBI_NOP(gdl)
-#define gSPModifyVertex(gdl, ...)    _GBI_NOP(gdl)
-
-/* --- Lighting --- */
-#define gSPSetLights0(gdl, l)        _GBI_NOP(gdl)
-#define gSPSetLights1(gdl, l)        _GBI_NOP(gdl)
-#define gSPSetLights2(gdl, l)        _GBI_NOP(gdl)
-#define gSPNumLights(gdl, n)         _GBI_NOP(gdl)
-#define gSPLight(gdl, l, n)          _GBI_NOP(gdl)
-#define gSPLookAt(gdl, ...)          _GBI_NOP(gdl)
-
-/* --- Geometry mode --- */
-#define gSPSetGeometryMode(gdl, m)   _GBI_NOP(gdl)
-#define gSPClearGeometryMode(gdl,m)  _GBI_NOP(gdl)
-#define gSPLoadGeometryMode(gdl, m)  _GBI_NOP(gdl)
-
-/* --- Texture --- */
-#define gSPTexture(gdl, s, t, l, tile, on) _GBI_NOP(gdl)
-#define gDPSetTextureImage(gdl, ...)  _GBI_NOP(gdl)
-#define gDPSetTile(gdl, ...)          _GBI_NOP(gdl)
-#define gDPLoadTile(gdl, ...)         _GBI_NOP(gdl)
-#define gDPSetTileSize(gdl, ...)      _GBI_NOP(gdl)
-#define gDPLoadBlock(gdl, ...)        _GBI_NOP(gdl)
-#define gDPLoadTextureBlock(gdl, ...)          _GBI_NOP(gdl)
-#define gDPLoadTextureBlock_4b(gdl, ...)       _GBI_NOP(gdl)
-#define gDPLoadTextureTile(gdl, ...)           _GBI_NOP(gdl)
-#define gDPLoadTextureTile_4b(gdl, ...)        _GBI_NOP(gdl)
-#define gDPSetTextureLUT(gdl, mode)            _GBI_NOP(gdl)
-#define gDPLoadTLUT_pal16(gdl, pal, dram)      _GBI_NOP(gdl)
-#define gDPLoadTLUT_pal256(gdl, dram)          _GBI_NOP(gdl)
-
-/* --- Combiner / render mode --- */
-#define gDPSetCombineMode(gdl, a, b)           _GBI_NOP(gdl)
-#define gDPSetCombineLERP(gdl, ...)            _GBI_NOP(gdl)
-#define gDPSetRenderMode(gdl, a, b)            _GBI_NOP(gdl)
-#define gDPSetAlphaCompare(gdl, c)             _GBI_NOP(gdl)
-#define gDPSetDepthSource(gdl, src)            _GBI_NOP(gdl)
-#define gDPSetDepthImage(gdl, img)             _GBI_NOP(gdl)
-#define gDPSetColorImage(gdl, fmt, siz, w, img) _GBI_NOP(gdl)
-
-/* Bit-shift utility (N64 SDK macro) */
+/* Bit-shift utility (N64 SDK macros) */
 #define _SHIFTL(v, s, w)  (((u32)(v) & ((0x01 << (w)) - 1)) << (s))
 #define _SHIFTR(v, s, w)  (((u32)(v) >> (s)) & ((0x01 << (w)) - 1))
 
-/* F3DEX2 GBI raw command ids used in display list construction */
-#define G_TRI2           0xB1
-#define G_MODIFYVTX      0x02
-#define G_MWO_POINT_RGBA 0x10
-#define G_MWO_POINT_ST   0x14
+/* -------------------------------------------------------------------------
+ * F3DEX2 GBI opcode constants
+ * ------------------------------------------------------------------------- */
+#define G_SPNOOP          0x00
+#define G_VTX             0x01
+#define G_MODIFYVTX       0x02
+#define G_CULLDL          0x03
+#define G_BRANCH_Z        0x04
+#define G_TRI1            0x05
+#define G_TRI2            0x06
+#define G_QUAD            0x07
+#define G_TEXTURE_CMD     0xD7  /* renamed to avoid clash with G_TEXTURE flag */
+#define G_POPMTX          0xD8
+#define G_GEOMETRYMODE    0xD9
+#define G_MTX             0xDA
+#define G_MOVEWORD        0xDB
+#define G_MOVEMEM         0xDC
+#define G_DL              0xDE
+#define G_ENDDL           0xDF
+#define G_SETOTHERMODE_L  0xE2
+#define G_SETOTHERMODE_H  0xE3
+#define G_TEXRECT         0xE4
+#define G_TEXRECTFLIP     0xE5
+#define G_RDPLOADSYNC     0xE6
+#define G_RDPPIPESYNC     0xE7
+#define G_RDPTILESYNC     0xE8
+#define G_RDPFULLSYNC     0xE9
+#define G_SETSCISSOR_CMD  0xED
+#define G_SETPRIMDEPTH    0xEE
+#define G_LOADTLUT        0xF0
+#define G_SETTILESIZE     0xF2
+#define G_LOADBLOCK       0xF3
+#define G_LOADTILE        0xF4
+#define G_SETTILE         0xF5
+#define G_FILLRECT        0xF6
+#define G_SETFILLCOLOR    0xF7
+#define G_SETFOGCOLOR     0xF8
+#define G_SETBLENDCOLOR   0xF9
+#define G_SETPRIMCOLOR    0xFA
+#define G_SETENVCOLOR     0xFB
+#define G_SETCOMBINE      0xFC
+#define G_SETTIMG         0xFD
+#define G_SETZIMG         0xFE
+#define G_SETCIMG         0xFF
 
-/* gDma1p – write a DMA1 packet directly into display list */
-#define gDma1p(gdl, c, p, n, v)  _GBI_NOP(gdl)
+/* G_MOVEWORD indices */
+#define G_MWO_POINT_RGBA  0x10
+#define G_MWO_POINT_ST    0x14
+#define G_MW_SEGMENT      0x06
+#define G_MW_FOG          0x08
+#define G_MW_PERSPNORM    0x0E
+#define G_MW_CLIP         0x04
 
-/* G_SETFILLCOLOR command id (used as arg to gDPSetColor / DPRGBColor) */
-#define G_SETFILLCOLOR  0xf7
+/* Matrix parameter flags */
+#define G_MTX_MODELVIEW     0x00
+#define G_MTX_PROJECTION    0x04
+#define G_MTX_MUL           0x00
+#define G_MTX_LOAD          0x02
+#define G_MTX_NOPUSH        0x00
+#define G_MTX_PUSH          0x01
 
-/* gDPSetColor(gdl, cmd, val) — sets a color register by command id */
-#define gDPSetColor(gdl, cmd, val)             _GBI_NOP(gdl)
+/* Texture image formats */
+#define G_IM_FMT_RGBA   0
+#define G_IM_FMT_YUV    1
+#define G_IM_FMT_CI     2
+#define G_IM_FMT_IA     3
+#define G_IM_FMT_I      4
 
-/* DPRGBColor(gdl, cmd, r, g, b, a) — packs RGBA into a 32-bit fill color */
-#define DPRGBColor(gdl, cmd, r, g, b, a)       _GBI_NOP(gdl)
+/* Texture image component sizes */
+#define G_IM_SIZ_4b   0
+#define G_IM_SIZ_8b   1
+#define G_IM_SIZ_16b  2
+#define G_IM_SIZ_32b  3
 
-/* gSPScisTextureRectangle — texture rect with scissor clamp */
-#define gSPScisTextureRectangle(gdl, ...)      _GBI_NOP(gdl)
+/* G_MOVEMEM indices */
+#define G_MV_VIEWPORT     0x08
+#define G_MV_LIGHT        0x0A
+#define G_MV_LOOKATY       0x82
+#define G_MV_LOOKATX       0x84
 
-/* --- Fill / primitive color --- */
-#define gDPSetFillColor(gdl, c)                _GBI_NOP(gdl)
-#define gDPSetFogColor(gdl, r, g, b, a)        _GBI_NOP(gdl)
-#define gDPSetBlendColor(gdl, r, g, b, a)      _GBI_NOP(gdl)
-#define gDPSetPrimColor(gdl, m, l, r, g, b, a) _GBI_NOP(gdl)
-#define gDPSetEnvColor(gdl, r, g, b, a)        _GBI_NOP(gdl)
-#define gDPFillRectangle(gdl, xl, yl, xh, yh)  _GBI_NOP(gdl)
-#define gDPScisFillRectangle(gdl, ...)          _GBI_NOP(gdl)
-#define gDPSetScissor(gdl, ...)                 _GBI_NOP(gdl)
-#define gDPSetPrimDepth(gdl, ...)               _GBI_NOP(gdl)
+/* -------------------------------------------------------------------------
+ * GBI helpers
+ * ------------------------------------------------------------------------- */
+
+/* Write a display list command (statement form, used with gdl++) */
+#define _GBI_CMD(gdl, hi_val, lo_val) do { \
+    (gdl)->w.hi = (u32)(hi_val); \
+    (gdl)->w.lo = (u32)(lo_val); \
+} while(0)
+
+/* Static initializer for Gfx array literals (little-endian u64 packing) */
+#define _GBI_W(h, l) { (u64)(u32)(h) | ((u64)(u32)(l) << 32) }
+#define _GBI_W0(h)   { (u64)(u32)(h) }
+
+/* Backward compat: _GBI_NOP still used in some edge cases */
+#define _GBI_NOP(gdl) _GBI_CMD(gdl, 0, 0)
+
+/* -------------------------------------------------------------------------
+ * GBI statement macros (g* prefix) — write into Gfx* then caller does gdl++
+ * ------------------------------------------------------------------------- */
+
+/* --- Pipeline sync / NOP --- */
+#define gDPPipeSync(gdl)             _GBI_CMD(gdl, (u32)G_RDPPIPESYNC << 24, 0)
+#define gDPFullSync(gdl)             _GBI_CMD(gdl, (u32)G_RDPFULLSYNC << 24, 0)
+#define gDPTileSync(gdl)             _GBI_CMD(gdl, (u32)G_RDPTILESYNC << 24, 0)
+#define gDPLoadSync(gdl)             _GBI_CMD(gdl, (u32)G_RDPLOADSYNC << 24, 0)
+#define gDPNoOp(gdl)                 _GBI_CMD(gdl, 0, 0)
+#define gSPNoOp(gdl)                 _GBI_CMD(gdl, 0, 0)
+
+/* --- Display list control --- */
+#define gSPEndDisplayList(gdl)       _GBI_CMD(gdl, (u32)G_ENDDL << 24, 0)
+#define gSPDisplayList(gdl, dl)      _GBI_CMD(gdl, (u32)G_DL << 24, (u32)(uintptr_t)(dl))
+#define gSPBranchList(gdl, dl)       _GBI_CMD(gdl, ((u32)G_DL << 24) | 0x010000, (u32)(uintptr_t)(dl))
+
+/* --- Matrix --- */
+#define gSPMatrix(gdl, m, p) _GBI_CMD(gdl, \
+    ((u32)G_MTX << 24) | _SHIFTL(sizeof(Mtx)-1, 5, 19) | ((u32)((p) ^ G_MTX_PUSH) & 0xFF), \
+    (u32)(uintptr_t)(m))
+#define gSPPopMatrix(gdl, p) _GBI_CMD(gdl, \
+    ((u32)G_POPMTX << 24) | 0x380002, (u32)(sizeof(Mtx)))
+#define gSPLoadMatrix(gdl, m)        gSPMatrix(gdl, m, G_MTX_LOAD)
+#define gSPInsertMatrix(gdl, ...)    _GBI_CMD(gdl, 0, 0)
+#define gSPForceMatrix(gdl, mptr)    _GBI_CMD(gdl, (u32)G_MOVEMEM << 24, (u32)(uintptr_t)(mptr))
+
+/* --- Viewport --- */
+#define gSPViewport(gdl, vp) _GBI_CMD(gdl, \
+    ((u32)G_MOVEMEM << 24) | (G_MV_VIEWPORT << 8) | 0x38, \
+    (u32)(uintptr_t)(vp))
+
+/* --- Vertex / triangle --- */
+#define gSPVertex(gdl, v, n, v0) _GBI_CMD(gdl, \
+    ((u32)G_VTX << 24) | ((u32)(n) << 12) | (((u32)(v0) + (u32)(n)) << 1), \
+    (u32)(uintptr_t)(v))
+
+#define gSP1Triangle(gdl, v0, v1, v2, flag) _GBI_CMD(gdl, \
+    ((u32)G_TRI1 << 24) | ((u32)(v0)*2 << 16) | ((u32)(v1)*2 << 8) | ((u32)(v2)*2), 0)
+
+#define gSP2Triangles(gdl, v0, v1, v2, f0, v3, v4, v5, f1) _GBI_CMD(gdl, \
+    ((u32)G_TRI2 << 24) | ((u32)(v0)*2 << 16) | ((u32)(v1)*2 << 8) | ((u32)(v2)*2), \
+    ((u32)(v3)*2 << 16) | ((u32)(v4)*2 << 8) | ((u32)(v5)*2))
+
+#define gSP4Triangles(gdl, ...)      _GBI_CMD(gdl, (u32)G_TRI2 << 24, 0)
+
+#define gSPModifyVertex(gdl, vtx, where, val) _GBI_CMD(gdl, \
+    ((u32)G_MODIFYVTX << 24) | ((u32)(where) << 16) | ((u32)(vtx)*2), (u32)(val))
+
+/* --- Lighting --- */
+#define gSPSetLights0(gdl, l)        _GBI_CMD(gdl, (u32)G_MOVEMEM << 24, 0)
+#define gSPSetLights1(gdl, l)        _GBI_CMD(gdl, (u32)G_MOVEMEM << 24, 0)
+#define gSPSetLights2(gdl, l)        _GBI_CMD(gdl, (u32)G_MOVEMEM << 24, 0)
+#define gSPNumLights(gdl, n)         _GBI_CMD(gdl, \
+    ((u32)G_MOVEWORD << 24) | (0x80000 | ((u32)(n)+1)*0x20), 0)
+#define gSPLight(gdl, l, n) _GBI_CMD(gdl, \
+    ((u32)G_MOVEMEM << 24) | (G_MV_LIGHT << 8) | 0x18, \
+    (u32)(uintptr_t)(l))
+#define gSPLookAt(gdl, l) _GBI_CMD(gdl, \
+    ((u32)G_MOVEMEM << 24) | (G_MV_LOOKATY << 8), \
+    (u32)(uintptr_t)(l))
+
+/* --- Geometry mode --- */
+#define gSPSetGeometryMode(gdl, m)   _GBI_CMD(gdl, ((u32)G_GEOMETRYMODE << 24) | 0x00FFFFFF, (u32)(m))
+#define gSPClearGeometryMode(gdl, m) _GBI_CMD(gdl, ((u32)G_GEOMETRYMODE << 24) | (~(u32)(m) & 0x00FFFFFF), 0)
+#define gSPLoadGeometryMode(gdl, m)  _GBI_CMD(gdl, (u32)G_GEOMETRYMODE << 24, (u32)(m))
+
+/* --- Texture state --- */
+#define gSPTexture(gdl, s, t, level, tile, on) _GBI_CMD(gdl, \
+    ((u32)G_TEXTURE_CMD << 24) | ((u32)(level) << 11) | ((u32)(tile) << 8) | (u32)!!(on), \
+    ((u32)(s) << 16) | ((u32)(t) & 0xFFFF))
+
+/* --- Texture image / tile --- */
+#define gDPSetTextureImage(gdl, fmt, siz, width, img) _GBI_CMD(gdl, \
+    ((u32)G_SETTIMG << 24) | ((u32)(fmt) << 21) | ((u32)(siz) << 19) | ((u32)(width) - 1), \
+    (u32)(uintptr_t)(img))
+
+#define gDPSetTile(gdl, fmt, siz, line, tmem, tile, palette, cmt, maskt, shiftt, cms, masks, shifts) \
+    _GBI_CMD(gdl, \
+        ((u32)G_SETTILE << 24) | ((u32)(fmt) << 21) | ((u32)(siz) << 19) | ((u32)(line) << 9) | (u32)(tmem), \
+        ((u32)(tile) << 24) | ((u32)(palette) << 20) | ((u32)(cmt) << 18) | ((u32)(maskt) << 14) | \
+        ((u32)(shiftt) << 10) | ((u32)(cms) << 8) | ((u32)(masks) << 4) | (u32)(shifts))
+
+#define gDPLoadTile(gdl, tile, uls, ult, lrs, lrt) _GBI_CMD(gdl, \
+    ((u32)G_LOADTILE << 24) | ((u32)(uls) << 12) | (u32)(ult), \
+    ((u32)(tile) << 24) | ((u32)(lrs) << 12) | (u32)(lrt))
+
+#define gDPSetTileSize(gdl, tile, uls, ult, lrs, lrt) _GBI_CMD(gdl, \
+    ((u32)G_SETTILESIZE << 24) | ((u32)(uls) << 12) | (u32)(ult), \
+    ((u32)(tile) << 24) | ((u32)(lrs) << 12) | (u32)(lrt))
+
+#define gDPLoadBlock(gdl, tile, uls, ult, lrs, dxt) _GBI_CMD(gdl, \
+    ((u32)G_LOADBLOCK << 24) | ((u32)(uls) << 12) | (u32)(ult), \
+    ((u32)(tile) << 24) | ((u32)(lrs) << 12) | (u32)(dxt))
+
+/* Multi-command texture load helpers — encode as single commands for simplicity */
+#define gDPLoadTextureBlock(gdl, ...)          _GBI_CMD(gdl, (u32)G_SETTIMG << 24, 0)
+#define gDPLoadTextureBlock_4b(gdl, ...)       _GBI_CMD(gdl, (u32)G_SETTIMG << 24, 0)
+#define gDPLoadTextureTile(gdl, ...)           _GBI_CMD(gdl, (u32)G_SETTIMG << 24, 0)
+#define gDPLoadTextureTile_4b(gdl, ...)        _GBI_CMD(gdl, (u32)G_SETTIMG << 24, 0)
+
+#define gDPSetTextureLUT(gdl, mode)  _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (14 << 8) | 2, (u32)(mode) << 14)
+
+#define gDPLoadTLUT_pal16(gdl, pal, dram) _GBI_CMD(gdl, \
+    ((u32)G_LOADTLUT << 24), ((u32)(pal) << 24) | 0x0F0000)
+
+#define gDPLoadTLUT_pal256(gdl, dram) _GBI_CMD(gdl, \
+    ((u32)G_LOADTLUT << 24) | 0xFF, (u32)(uintptr_t)(dram))
+
+/* --- Combiner / render mode --- */
+#define gDPSetCombineMode(gdl, a, b) _GBI_CMD(gdl, (u32)G_SETCOMBINE << 24, 0)
+#define gDPSetCombineLERP(gdl, ...)  _GBI_CMD(gdl, (u32)G_SETCOMBINE << 24, 0)
+#define gDPSetCombine(gdl, a, b)     _GBI_CMD(gdl, ((u32)G_SETCOMBINE << 24) | ((u32)(a) & 0x00FFFFFF), (u32)(b))
+#define gDPSetRenderMode(gdl, a, b)  _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_L << 24) | (3 << 8) | 29, (u32)(a) | (u32)(b))
+#define gDPSetAlphaCompare(gdl, c)   _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_L << 24) | (0 << 8) | 2, (u32)(c))
+#define gDPSetDepthSource(gdl, src)  _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_L << 24) | (2 << 8) | 1, (u32)(src) << 2)
+#define gDPSetDepthImage(gdl, img)   _GBI_CMD(gdl, (u32)G_SETZIMG << 24, (u32)(uintptr_t)(img))
+#define gDPSetColorImage(gdl, fmt, siz, w, img) _GBI_CMD(gdl, \
+    ((u32)G_SETCIMG << 24) | ((u32)(fmt) << 21) | ((u32)(siz) << 19) | ((u32)(w) - 1), \
+    (u32)(uintptr_t)(img))
+
+/* --- Color registers --- */
+#define gDPSetColor(gdl, cmd, val)   _GBI_CMD(gdl, (u32)(cmd) << 24, (u32)(val))
+#define DPRGBColor(gdl, cmd, r, g, b, a) _GBI_CMD(gdl, (u32)(cmd) << 24, \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+#define gDPSetFillColor(gdl, c)      _GBI_CMD(gdl, (u32)G_SETFILLCOLOR << 24, (u32)(c))
+#define gDPSetFogColor(gdl, r, g, b, a) _GBI_CMD(gdl, (u32)G_SETFOGCOLOR << 24, \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+#define gDPSetBlendColor(gdl, r, g, b, a) _GBI_CMD(gdl, (u32)G_SETBLENDCOLOR << 24, \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+#define gDPSetPrimColor(gdl, m, l, r, g, b, a) _GBI_CMD(gdl, \
+    ((u32)G_SETPRIMCOLOR << 24) | ((u32)(m) << 8) | (u32)(l), \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+#define gDPSetEnvColor(gdl, r, g, b, a) _GBI_CMD(gdl, (u32)G_SETENVCOLOR << 24, \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+
+/* --- Fill / scissor rectangles --- */
+#define gDPFillRectangle(gdl, xl, yl, xh, yh) _GBI_CMD(gdl, \
+    ((u32)G_FILLRECT << 24) | ((u32)(xh) << 14) | ((u32)(yh) << 2), \
+    ((u32)(xl) << 14) | ((u32)(yl) << 2))
+#define gDPScisFillRectangle(gdl, ...)         _GBI_CMD(gdl, (u32)G_FILLRECT << 24, 0)
+#define gDPSetScissor(gdl, mode, xl, yl, xh, yh) _GBI_CMD(gdl, \
+    ((u32)G_SETSCISSOR_CMD << 24) | ((u32)((xl)*4) << 12) | (u32)((yl)*4), \
+    ((u32)(mode) << 24) | ((u32)((xh)*4) << 12) | (u32)((yh)*4))
+#define gDPSetPrimDepth(gdl, z, dz)  _GBI_CMD(gdl, (u32)G_SETPRIMDEPTH << 24, \
+    ((u32)(z) << 16) | (u32)(dz))
+
+/* --- Texture rectangle (2D blit) ---
+ * Encodes rect coords in a single Gfx entry (simplified for Linux port).
+ * hi: G_TEXRECT | xh[11:0]<<12 | yh[11:0]
+ * lo: tile<<24 | xl[11:0]<<12 | yl[11:0]
+ * S/T/dsdx/dtdy are not encoded (backend uses full-texture UV mapping).
+ */
+#define gSPScisTextureRectangle(pkt, xl, yl, xh, yh, tile, s, t, dsdx, dtdy) \
+    _GBI_CMD(pkt, \
+        ((u32)G_TEXRECT << 24) | (((u32)(xh) & 0xFFF) << 12) | ((u32)(yh) & 0xFFF), \
+        ((u32)(tile) << 24) | (((u32)(xl) & 0xFFF) << 12) | ((u32)(yl) & 0xFFF))
 
 /* --- Fog --- */
-#define gSPFogPosition(gdl, min, max)           _GBI_NOP(gdl)
-#define gSPSetFog(gdl, ...)                     _GBI_NOP(gdl)
+#define gSPFogPosition(gdl, mn, mx) _GBI_CMD(gdl, \
+    ((u32)G_MOVEWORD << 24) | (G_MW_FOG << 16), \
+    ((u32)((128000 / ((mx) - (mn))) & 0xFFFF) << 16) | \
+    (u32)((500 - (mn)) * 256 / ((mx) - (mn)) & 0xFFFF))
+#define gSPSetFog(gdl, ...)          _GBI_CMD(gdl, ((u32)G_MOVEWORD << 24) | (G_MW_FOG << 16), 0)
 
 /* --- Segment --- */
-#define gSPSegment(gdl, seg, base)              _GBI_NOP(gdl)
+#define gSPSegment(gdl, seg, base) _GBI_CMD(gdl, \
+    ((u32)G_MOVEWORD << 24) | (G_MW_SEGMENT << 16) | ((u32)(seg) * 4), \
+    (u32)(uintptr_t)(base))
 
-/* --- Other --- */
-#define gSPClipRatio(gdl, r)                    _GBI_NOP(gdl)
-#define gSPPerspNormalize(gdl, s)               _GBI_NOP(gdl)
-#define gSPCullDisplayList(gdl, vstart, vend)   _GBI_NOP(gdl)
-#define gSPBranchLessZraw(gdl, ...)             _GBI_NOP(gdl)
-#define gSPBranchLessZ(gdl, ...)                _GBI_NOP(gdl)
+/* --- Other RSP commands --- */
+#define gSPClipRatio(gdl, r)                    _GBI_CMD(gdl, ((u32)G_MOVEWORD << 24) | (G_MW_CLIP << 16), 0)
+#define gSPPerspNormalize(gdl, s)               _GBI_CMD(gdl, ((u32)G_MOVEWORD << 24) | (G_MW_PERSPNORM << 16), (u32)(s))
+#define gSPCullDisplayList(gdl, vstart, vend)   _GBI_CMD(gdl, ((u32)G_CULLDL << 24) | ((u32)(vstart)*2), (u32)(vend)*2)
+#define gSPBranchLessZraw(gdl, ...)             _GBI_CMD(gdl, (u32)G_BRANCH_Z << 24, 0)
+#define gSPBranchLessZ(gdl, ...)                _GBI_CMD(gdl, (u32)G_BRANCH_Z << 24, 0)
 
-/* Additional pipe macros used by game code */
-#define gDPSetCombine(gdl, a, b)               _GBI_NOP(gdl)
-#define gDPSetCycleType(gdl, c)                _GBI_NOP(gdl)
-#define gDPPipelineMode(gdl, m)                _GBI_NOP(gdl)
-#define gDPSetCombineKey(gdl, k)               _GBI_NOP(gdl)
-#define gDPSetColorDither(gdl, d)              _GBI_NOP(gdl)
-#define gDPSetAlphaDither(gdl, d)              _GBI_NOP(gdl)
-#define gDPSetTextureLOD(gdl, l)               _GBI_NOP(gdl)
-#define gDPSetTextureLUT(gdl, l)               _GBI_NOP(gdl)
-#define gDPSetTextureConvert(gdl, c)           _GBI_NOP(gdl)
-#define gDPSetTextureFilter(gdl, f)            _GBI_NOP(gdl)
-#define gDPSetTexturePersp(gdl, p)             _GBI_NOP(gdl)
-#define gDPSetTextureDetail(gdl, d)            _GBI_NOP(gdl)
-#define gSPLoadGeometryMode(gdl, w)            _GBI_NOP(gdl)
-#define gSPTexture(gdl, sc, tc, lv, on, t)    _GBI_NOP(gdl)
-#define gDPSetTextureImage(gdl, ...)           _GBI_NOP(gdl)
-#define gDPLoadTLUT_pal16(gdl, ...)            _GBI_NOP(gdl)
-#define gDPLoadTLUT_pal256(gdl, ...)           _GBI_NOP(gdl)
-#define gDPLoadBlock(gdl, ...)                 _GBI_NOP(gdl)
-#define gDPLoadTile(gdl, ...)                  _GBI_NOP(gdl)
-#define gDPSetTile(gdl, ...)                   _GBI_NOP(gdl)
-#define gDPSetTileSize(gdl, ...)               _GBI_NOP(gdl)
-#define gDPLoadTextureTile(gdl, ...)           _GBI_NOP(gdl)
-#define gDPLoadTextureTile_4b(gdl, ...)        _GBI_NOP(gdl)
-#define gSPLight(gdl, l, n)                    _GBI_NOP(gdl)
-#define gSPNumLights(gdl, n)                   _GBI_NOP(gdl)
-#define gSPLookAt(gdl, l)                      _GBI_NOP(gdl)
-#define gDPWord(gdl, h, l)                     _GBI_NOP(gdl)
+/* --- SetOtherMode wrappers --- */
+#define gDPSetCycleType(gdl, c) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (20 << 8) | 2, (u32)(c) << 20)
+#define gDPPipelineMode(gdl, m) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (23 << 8) | 1, (u32)(m) << 23)
+#define gDPSetCombineKey(gdl, k) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (8 << 8) | 1, (u32)(k) << 8)
+#define gDPSetColorDither(gdl, d) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (22 << 8) | 2, (u32)(d) << 22)
+#define gDPSetAlphaDither(gdl, d) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (4 << 8) | 2, (u32)(d) << 4)
+#define gDPSetTextureLOD(gdl, l) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (12 << 8) | 1, (u32)(l) << 12)
+#define gDPSetTextureConvert(gdl, c) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (9 << 8) | 3, (u32)(c) << 9)
+#define gDPSetTextureFilter(gdl, f) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (12 << 8) | 2, (u32)(f) << 12)
+#define gDPSetTexturePersp(gdl, p) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (19 << 8) | 1, (u32)(p) << 19)
+#define gDPSetTextureDetail(gdl, d) _GBI_CMD(gdl, \
+    ((u32)G_SETOTHERMODE_H << 24) | (17 << 8) | 2, (u32)(d) << 17)
 
-/* Static (array initializer) versions */
-#define gsDPPipeSync()                  _GBI_SNOP()
-#define gsDPFullSync()                  _GBI_SNOP()
-#define gsDPTileSync()                  _GBI_SNOP()
-#define gsDPNoOp()                      _GBI_SNOP()
-#define gsDPSetCombine(a, b)            _GBI_SNOP()
-#define gsDPSetCycleType(c)             _GBI_SNOP()
-#define gsDPPipelineMode(m)             _GBI_SNOP()
-#define gsDPSetCombineMode(a, b)        _GBI_SNOP()
-#define gsDPSetCombineKey(k)            _GBI_SNOP()
-#define gsDPSetColorDither(d)           _GBI_SNOP()
-#define gsDPSetAlphaDither(d)           _GBI_SNOP()
-#define gsDPSetAlphaCompare(c)          _GBI_SNOP()
-#define gsDPSetTextureLOD(l)            _GBI_SNOP()
-#define gsDPSetTextureLUT(l)            _GBI_SNOP()
-#define gsDPSetTextureConvert(c)        _GBI_SNOP()
-#define gsDPSetTextureFilter(f)         _GBI_SNOP()
-#define gsDPSetTexturePersp(p)          _GBI_SNOP()
-#define gsDPSetTextureDetail(d)         _GBI_SNOP()
-#define gsDPSetRenderMode(a, b)         _GBI_SNOP()
-#define gsDPSetFillColor(c)             _GBI_SNOP()
-#define gsDPFillRectangle(xl,yl,xh,yh)  _GBI_SNOP()
-#define gsDPSetScissor(...)             _GBI_SNOP()
-#define gsDPSetPrimColor(...)           _GBI_SNOP()
-#define gsDPSetEnvColor(...)            _GBI_SNOP()
-#define gsDPSetColorImage(...)          _GBI_SNOP()
-#define gsDPSetDepthImage(img)          _GBI_SNOP()
-#define gsDPSetDepthSource(s)           _GBI_SNOP()
-#define gsDPSetTile(...)                _GBI_SNOP()
-#define gsDPSetTileSize(...)            _GBI_SNOP()
-#define gsDPLoadSync()                  _GBI_SNOP()
-#define gsDPWord(h, l)                  _GBI_SNOP()
-#define gsSPEndDisplayList()            _GBI_SNOP()
-#define gsSPDisplayList(dl)             _GBI_SNOP()
-#define gsSPMatrix(m, p)                _GBI_SNOP()
-#define gsSPVertex(v, n, idx)           _GBI_SNOP()
-#define gsSP1Triangle(...)              _GBI_SNOP()
-#define gsSP2Triangles(...)             _GBI_SNOP()
-#define gsSP4Triangles(...)             _GBI_SNOP()
-#define gsSPLoadGeometryMode(w)         _GBI_SNOP()
-#define gsSPSetGeometryMode(w)          _GBI_SNOP()
-#define gsSPClearGeometryMode(w)        _GBI_SNOP()
-#define gsSPTexture(sc, tc, lv, on, t)  _GBI_SNOP()
-#define gsSPLight(l, n)                 _GBI_SNOP()
-#define gsSPNumLights(n)                _GBI_SNOP()
-#define gsSPLookAt(l)                   _GBI_SNOP()
-#define gsSPFogPosition(mn, mx)         _GBI_SNOP()
-#define gsSPSegment(seg, base)          _GBI_SNOP()
-#define gsSPClipRatio(r)                _GBI_SNOP()
-#define gsSPNoop()                      _GBI_SNOP()
-#define gsSPNoOp()                      _GBI_SNOP()
-#define gsSPBranchList(dl)              _GBI_SNOP()
-#define gsSPViewport(vp)                _GBI_SNOP()
+/* gSPSetOtherMode(gdl, cmd, sft, len, data) — generic other-mode setter */
+#define gSPSetOtherMode(gdl, cmd, sft, len, data) _GBI_CMD(gdl, \
+    ((u32)(cmd) << 24) | ((u32)(sft) << 8) | (u32)(len), (u32)(data))
+
+/* gDma1p – write a DMA1 packet directly into display list */
+#define gDma1p(gdl, c, p, n, v)  _GBI_CMD(gdl, \
+    ((u32)(c) << 24) | ((u32)(n) << 5) | (u32)(v), (u32)(uintptr_t)(p))
+
+/* gDPWord — write arbitrary hi/lo values */
+#define gDPWord(gdl, h, l)  _GBI_CMD(gdl, (u32)(h), (u32)(l))
+
+/* -------------------------------------------------------------------------
+ * GBI static initializer macros (gs* prefix) — for Gfx array literals
+ * Uses little-endian u64 packing: u64 = (u32)hi | ((u64)(u32)lo << 32)
+ * ------------------------------------------------------------------------- */
+#define gsDPPipeSync()                  _GBI_W0((u32)G_RDPPIPESYNC << 24)
+#define gsDPFullSync()                  _GBI_W0((u32)G_RDPFULLSYNC << 24)
+#define gsDPTileSync()                  _GBI_W0((u32)G_RDPTILESYNC << 24)
+#define gsDPLoadSync()                  _GBI_W0((u32)G_RDPLOADSYNC << 24)
+#define gsDPNoOp()                      _GBI_W0(0)
+#define gsSPNoop()                      _GBI_W0(0)
+#define gsSPNoOp()                      _GBI_W0(0)
+#define gsSPEndDisplayList()            _GBI_W0((u32)G_ENDDL << 24)
+#define gsSPDisplayList(dl)             _GBI_W((u32)G_DL << 24, (u32)(uintptr_t)(dl))
+#define gsSPBranchList(dl)              _GBI_W(((u32)G_DL << 24) | 0x010000, (u32)(uintptr_t)(dl))
+
+#define gsDPSetCombine(a, b)            _GBI_W(((u32)G_SETCOMBINE << 24) | ((u32)(a) & 0x00FFFFFF), (u32)(b))
+#define gsDPSetCycleType(c)             _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (20 << 8) | 2, (u32)(c) << 20)
+#define gsDPPipelineMode(m)             _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (23 << 8) | 1, (u32)(m) << 23)
+#define gsDPSetCombineMode(a, b)        _GBI_W0((u32)G_SETCOMBINE << 24)
+#define gsDPSetCombineKey(k)            _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (8 << 8) | 1, (u32)(k) << 8)
+#define gsDPSetColorDither(d)           _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (22 << 8) | 2, (u32)(d) << 22)
+#define gsDPSetAlphaDither(d)           _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (4 << 8) | 2, (u32)(d) << 4)
+#define gsDPSetAlphaCompare(c)          _GBI_W(((u32)G_SETOTHERMODE_L << 24) | (0 << 8) | 2, (u32)(c))
+#define gsDPSetTextureLOD(l)            _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (12 << 8) | 1, (u32)(l) << 12)
+#define gsDPSetTextureLUT(l)            _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (14 << 8) | 2, (u32)(l) << 14)
+#define gsDPSetTextureConvert(c)        _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (9 << 8) | 3, (u32)(c) << 9)
+#define gsDPSetTextureFilter(f)         _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (12 << 8) | 2, (u32)(f) << 12)
+#define gsDPSetTexturePersp(p)          _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (19 << 8) | 1, (u32)(p) << 19)
+#define gsDPSetTextureDetail(d)         _GBI_W(((u32)G_SETOTHERMODE_H << 24) | (17 << 8) | 2, (u32)(d) << 17)
+#define gsDPSetRenderMode(a, b)         _GBI_W(((u32)G_SETOTHERMODE_L << 24) | (3 << 8) | 29, (u32)(a) | (u32)(b))
+#define gsDPSetFillColor(c)             _GBI_W((u32)G_SETFILLCOLOR << 24, (u32)(c))
+#define gsDPFillRectangle(xl, yl, xh, yh) _GBI_W( \
+    ((u32)G_FILLRECT << 24) | ((u32)(xh) << 14) | ((u32)(yh) << 2), \
+    ((u32)(xl) << 14) | ((u32)(yl) << 2))
+#define gsDPSetScissor(...)             _GBI_W0((u32)G_SETSCISSOR_CMD << 24)
+#define gsDPSetPrimColor(m, l, r, g, b, a) _GBI_W( \
+    ((u32)G_SETPRIMCOLOR << 24) | ((u32)(m) << 8) | (u32)(l), \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+#define gsDPSetEnvColor(r, g, b, a)     _GBI_W((u32)G_SETENVCOLOR << 24, \
+    ((u32)(r) << 24) | ((u32)(g) << 16) | ((u32)(b) << 8) | (u32)(a))
+#define gsDPSetColorImage(fmt, siz, w, img) _GBI_W( \
+    ((u32)G_SETCIMG << 24) | ((u32)(fmt) << 21) | ((u32)(siz) << 19) | ((u32)(w) - 1), \
+    (u32)(uintptr_t)(img))
+#define gsDPSetDepthImage(img)          _GBI_W((u32)G_SETZIMG << 24, (u32)(uintptr_t)(img))
+#define gsDPSetDepthSource(s)           _GBI_W(((u32)G_SETOTHERMODE_L << 24) | (2 << 8) | 1, (u32)(s) << 2)
+#define gsDPSetTile(...)                _GBI_W0((u32)G_SETTILE << 24)
+#define gsDPSetTileSize(...)            _GBI_W0((u32)G_SETTILESIZE << 24)
+#define gsDPWord(h, l)                  _GBI_W((u32)(h), (u32)(l))
+
+#define gsSPMatrix(m, p)                _GBI_W(((u32)G_MTX << 24) | ((u32)((p) ^ G_MTX_PUSH) & 0xFF), (u32)(uintptr_t)(m))
+#define gsSPVertex(v, n, idx)           _GBI_W(((u32)G_VTX << 24) | ((u32)(n) << 12) | (((u32)(idx) + (u32)(n)) << 1), (u32)(uintptr_t)(v))
+#define gsSP1Triangle(v0, v1, v2, flag) _GBI_W(((u32)G_TRI1 << 24) | ((u32)(v0)*2 << 16) | ((u32)(v1)*2 << 8) | ((u32)(v2)*2), 0)
+#define gsSP2Triangles(v0, v1, v2, f0, v3, v4, v5, f1) _GBI_W( \
+    ((u32)G_TRI2 << 24) | ((u32)(v0)*2 << 16) | ((u32)(v1)*2 << 8) | ((u32)(v2)*2), \
+    ((u32)(v3)*2 << 16) | ((u32)(v4)*2 << 8) | ((u32)(v5)*2))
+#define gsSP4Triangles(...)             _GBI_W0((u32)G_TRI2 << 24)
+#define gsSPLoadGeometryMode(w)         _GBI_W((u32)G_GEOMETRYMODE << 24, (u32)(w))
+#define gsSPSetGeometryMode(w)          _GBI_W(((u32)G_GEOMETRYMODE << 24) | 0x00FFFFFF, (u32)(w))
+#define gsSPClearGeometryMode(w)        _GBI_W(((u32)G_GEOMETRYMODE << 24) | (~(u32)(w) & 0x00FFFFFF), 0)
+#define gsSPTexture(sc, tc, lv, tile, on) _GBI_W( \
+    ((u32)G_TEXTURE_CMD << 24) | ((u32)(lv) << 11) | ((u32)(tile) << 8) | (u32)!!(on), \
+    ((u32)(sc) << 16) | ((u32)(tc) & 0xFFFF))
+#define gsSPLight(l, n)                 _GBI_W0((u32)G_MOVEMEM << 24)
+#define gsSPNumLights(n)                _GBI_W0((u32)G_MOVEWORD << 24)
+#define gsSPLookAt(l)                   _GBI_W0((u32)G_MOVEMEM << 24)
+#define gsSPFogPosition(mn, mx)         _GBI_W0(((u32)G_MOVEWORD << 24) | ((u32)G_MW_FOG << 16))
+#define gsSPSegment(seg, base)          _GBI_W(((u32)G_MOVEWORD << 24) | ((u32)G_MW_SEGMENT << 16) | ((u32)(seg)*4), (u32)(uintptr_t)(base))
+#define gsSPClipRatio(r)                _GBI_W0(((u32)G_MOVEWORD << 24) | ((u32)G_MW_CLIP << 16))
+#define gsSPViewport(vp)                _GBI_W(((u32)G_MOVEMEM << 24) | ((u32)G_MV_VIEWPORT << 8) | 0x38, (u32)(uintptr_t)(vp))
 
 /* DP mode constants missing from N64 SDK shim */
 #define G_CD_NOISE          2
@@ -819,6 +998,9 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_AD_NOTPATTERN     1
 #define G_AD_NOISE          2
 #define G_AD_DISABLE        3
+#define G_TL_LOD            1
+#define G_CD_MAGICSQ        3
+#define G_SC_NON_INTERLACE  0
 #define G_AC_NONE           0
 #define G_AC_THRESHOLD      1
 #define G_AC_DITHER         3
@@ -827,21 +1009,7 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_TLUT_IA16         3
 #define G_ON                1
 #define G_OFF               0
-#define G_MTX_MODELVIEW     0x00
-#define G_MTX_PROJECTION    0x04
-#define G_MTX_MUL           0x00
-#define G_MTX_LOAD          0x02
-#define G_MTX_NOPUSH        0x00
-#define G_MTX_PUSH          0x01
-#define G_IM_FMT_RGBA       0
-#define G_IM_FMT_YUV        1
-#define G_IM_FMT_CI         2
-#define G_IM_FMT_IA         3
-#define G_IM_FMT_I          4
-#define G_IM_SIZ_4b         0
-#define G_IM_SIZ_8b         1
-#define G_IM_SIZ_16b        2
-#define G_IM_SIZ_32b        3
+/* G_MTX_*, G_IM_FMT_*, G_IM_SIZ_* defined in GBI section above */
 
 /* Combiner macro constants (not meaningful on Linux) */
 #define G_CC_MODULATEI       0,0,0,0,0,0,0,0
@@ -893,6 +1061,20 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_RM_FOG_SHADE_A2       0
 #define G_RM_FOG_PRIM_A2        0
 #define G_RM_PASS2              0
+#define G_RM_XLU_SURF2          0
+
+/* Blender color source constants (used in raw render mode expressions) */
+#define G_BL_CLR_IN             0
+#define G_BL_CLR_MEM            1
+#define G_BL_CLR_BL             2
+#define G_BL_CLR_FOG            3
+#define G_BL_A_IN               0
+#define G_BL_A_FOG              1
+#define G_BL_A_SHADE            2
+#define G_BL_1MA                0
+#define G_BL_A_MEM              1
+#define G_BL_1                  2
+#define G_BL_0                  3
 #define G_RM_NOOP2              0
 
 /* Geometry mode flags */
@@ -908,27 +1090,6 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_CULL_BACK         0x00000400
 #define G_CULL_BOTH         (G_CULL_FRONT|G_CULL_BACK)
 #define G_CLIPPING          0x00800000
-
-/* Matrix parameter flags */
-#define G_MTX_MODELVIEW     0x00
-#define G_MTX_PROJECTION    0x04
-#define G_MTX_MUL           0x00
-#define G_MTX_LOAD          0x02
-#define G_MTX_NOPUSH        0x00
-#define G_MTX_PUSH          0x01
-
-/* Texture image formats */
-#define G_IM_FMT_RGBA   0
-#define G_IM_FMT_YUV    1
-#define G_IM_FMT_CI     2
-#define G_IM_FMT_IA     3
-#define G_IM_FMT_I      4
-
-/* Texture image component sizes */
-#define G_IM_SIZ_4b   0
-#define G_IM_SIZ_8b   1
-#define G_IM_SIZ_16b  2
-#define G_IM_SIZ_32b  3
 
 /* Pixel packing macros */
 #define GPACK_RGBA5551(r,g,b,a)  ((((r)&0x1f)<<11)|(((g)&0x1f)<<6)|(((b)&0x1f)<<1)|((a)&0x1))
@@ -969,12 +1130,15 @@ extern u8 gspF3DEX2_fifoDataStart[4];
 #define G_IM_SIZ_32b_LOAD_BLOCK G_IM_SIZ_32b
 
 /* SetOtherMode_H shift/size constants */
-#define G_MDSFT_TEXTLUT  14
+#define G_MDSFT_TEXTLUT   14
+#define G_MDSFT_TEXTFILT  12
+#define G_MDSFT_TEXTDETAIL 17
+#define G_MDSFT_TEXTLOD   12
+#define G_MDSFT_TEXTPERSP 19
+#define G_MDSFT_CYCLETYPE 20
+#define G_MDSFT_PIPELINE  23
 #define G_MDSIZ_TEXTLUT   2
-#define G_SETOTHERMODE_H  0xE3
-
-/* gSPSetOtherMode(gdl, cmd, sft, len, data) */
-#define gSPSetOtherMode(gdl, cmd, sft, len, data) _GBI_NOP(gdl)
+/* G_SETOTHERMODE_H defined in GBI section above */
 
 /* =========================================================================
  * Math stubs (N64 gu* functions)
@@ -1049,6 +1213,15 @@ s32     osPiStartDma(OSIoMesg *mb, s32 pri, s32 dir, u32 devAddr, void *vAddr, u
 void    osInvalDCache(void *vaddr, s32 nbytes);
 void    osWritebackDCache(void *vaddr, s32 nbytes);
 void    osWritebackDCacheAll(void);
+
+/* On N64, converts KSEG0/KSEG1 address to physical.  On Linux, identity. */
+static inline void *osVirtualToPhysical(void *addr) { return addr; }
+static inline void *osPhysicalToVirtual(void *addr) { return addr; }
+
+/* N64 segment addressing: SEGMENT_ADDR(seg, offset) builds a segment-relative
+   address.  On Linux with flat addressing, segments are resolved at load time,
+   so this is effectively just the offset (segment base added elsewhere). */
+#define SEGMENT_ADDR(seg, off) ((void *)(((u32)(seg) << 24) | (u32)(off)))
 
 OSTime  osGetTime(void);
 u32     osGetMemSize(void);

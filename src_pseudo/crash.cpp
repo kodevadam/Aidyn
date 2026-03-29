@@ -17,7 +17,14 @@ void CrashProc(void* x){
   InitEventMesg();
   while(1) {
     osRecvMesg(&gCrashManager.MesgQ,&temp,1);
+#ifdef __linux__
+    /* On Linux, don't try to render the N64 crash screen — it accesses
+     * a raw framebuffer that doesn't exist. Just log and continue. */
+    fprintf(stderr, "[CRASH] Game triggered CRASH: pos=%s cause=%s\n",
+            gCrashManager.sub.position, gCrashManager.sub.Cause);
+#else
     (*gCrashManager.Func)(&gCrashManager.sub);
+#endif
   }
 }
 
