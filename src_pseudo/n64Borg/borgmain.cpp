@@ -254,7 +254,16 @@ borgHeader * getBorgItem(s32 index){
             HFREE(borgfile,567); HFREE(ret,568); return NULL;
           }
           fprintf(stderr, "[borg] calling borg_funcs_a[%d] on borgfile=%p\n", listing.Type, borgfile);
+#ifdef __linux__
+          if (listing.Type == 1)
+            (*borg_funcs_a[listing.Type])(borgfile);
+          else {
+            fprintf(stderr, "[borg] Skipping non-type-1 item %d (Type=%d) on Linux (non-borgFlag fresh)\n", index, listing.Type);
+            HFREE(borgfile,567); HFREE(ret,568); return NULL;
+          }
+#else
           (*borg_funcs_a[listing.Type])(borgfile);
+#endif
           gBorgpointers[index] = (borgHeader*)borgfile;
           gBorgBytes[index] = 1;
         }
