@@ -545,7 +545,8 @@ u8 InitBorgTexture(Borg1Header *header,Borg1Data *dat_raw){
 #endif
 
   header->dat = dat;
-  fprintf(stderr, "[borg1] InitBorgTexture: type=%u flag=0x%x W=%u H=%u bmp=%p pal=%p dList=%p\n",
+  fprintf(stderr, "[borg1] InitBorgTexture: idx=%d type=%u flag=0x%x W=%u H=%u bmp=%p pal=%p dList=%p\n",
+          header->head.index,
           dat->type, dat->flag, dat->Width, dat->Height,
           (void*)dat->bmp, (void*)dat->pallette, (void*)dat->dList);
   if (!(dat->flag & B1_Procedural)) {
