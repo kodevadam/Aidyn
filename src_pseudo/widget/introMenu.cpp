@@ -73,6 +73,15 @@ Gfx * IntroMenu::Render(Gfx *g,u16 x0,u16 y0,u16 x1,u16 y1) {
   IntroMenuSub *sub;
   
   sub = IntroSub;
+  { static int renderLog = 0;
+    if (renderLog < 3) {
+      fprintf(stderr, "[intro] Render: menuState=%d unk1c=%p unk20=%p unk80=%p unk84=%p alpha0=%u alpha1=%u\n",
+              sub->menuState, (void*)sub->unk1c, (void*)sub->unk20,
+              (void*)this->unk80, (void*)this->unk84,
+              this->alpha0, this->alpha1);
+      renderLog++;
+    }
+  }
   if (sub->menuState == IntroM_ConfigMenu) {
       OptionsConfigSubstruct *  configSub = (OptionsConfigSubstruct *)sub->config->substruct;
     if (configSub->renameOpen == false) {
@@ -297,7 +306,8 @@ void IntroMenu::ShowStartGameMenu() {
   BaseWidget *pBVar4;
   BaseWidget *pBVar5;
   IntroMenuSub *piVar3;
-  
+
+  fprintf(stderr, "[intro] ShowStartGameMenu() called\n");
   piVar3 = IntroSub;
   pBVar4 = piVar3->unk1c;
   piVar3->unk20 = pBVar4;
@@ -306,12 +316,15 @@ void IntroMenu::ShowStartGameMenu() {
     piVar3->unk1c = NULL;
   }
   if (piVar3->StartMenu == NULL) {
+    fprintf(stderr, "[intro] Creating StartGameMenu...\n");
     piVar3->StartMenu = StartGameMenu();
+    fprintf(stderr, "[intro] StartGameMenu=%p\n", (void*)piVar3->StartMenu);
     piVar3->StartMenu->SetColor(COLOR_OFFWHITE);
   }
   pBVar4 = piVar3->StartMenu;
   s16 sVar1 = piVar3->StartMenu->posX;
   s16 sVar2 = piVar3->StartMenu->posY;
+  fprintf(stderr, "[intro] StartMenu pos=(%d,%d)\n", sVar1, sVar2);
   this->unk80 = this->unk84;
   this->unk84 = IntroMenu_ShadowBG(sVar1 + -0x42,sVar2 + -0x30,sVar1 + 0x42,sVar2 + 0x76);
   piVar3->menuState = IntroM_processIntoMenu;
@@ -321,6 +334,8 @@ void IntroMenu::ShowStartGameMenu() {
   Utilities::SetAlpha(piVar3->unk1c,0);
   this->alpha1 = 0xff;
   if (piVar3->unk20)Utilities::SetAlpha(piVar3->unk20,0xff);
+  fprintf(stderr, "[intro] ShowStartGameMenu done, menuState=%d alpha0=%u alpha1=%u\n",
+          piVar3->menuState, this->alpha0, this->alpha1);
 }
 
 void IntroMenu::InitOptionsMenu() {
@@ -419,6 +434,13 @@ void IntroMenu::ShowContPakMenu() {
 
 
 WidgetScrollMenu * IntroMenu::StartGameMenu() {
+  fprintf(stderr, "[intro] StartGameMenu: CommonStrings=%p\n", (void*)gGlobals.CommonStrings);
+  if (gGlobals.CommonStrings) {
+    fprintf(stderr, "[intro] CommonStrings[0x9f]='%s' [0xa0]='%s' [0xa1]='%s'\n",
+            gGlobals.CommonStrings[0x9f] ? gGlobals.CommonStrings[0x9f] : "(null)",
+            gGlobals.CommonStrings[0xa0] ? gGlobals.CommonStrings[0xa0] : "(null)",
+            gGlobals.CommonStrings[0xa1] ? gGlobals.CommonStrings[0xa1] : "(null)");
+  }
   WidgetScrollMenu *scroll = new WidgetScrollMenu(7);
   WidgetBorg8 *title = WidgetB8(BORG8_TitleMenui);
   title->SetCoords(SCREEN_CENTERW - (title->GetWidth() >> 1),50);
