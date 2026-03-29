@@ -309,11 +309,12 @@ Gfx * N64BorgImageDraw(Gfx *g,Borg8Header *borg8,float x,float y,u16 xOff,u16 yO
   fVar36 = x * sImageHScale;
   uVar1 = (borg8->dat).Width;
   { static int drawLog = 0;
-    if (drawLog < 5 && BMP != nullptr) {
+    if (drawLog < 5) {
       fprintf(stderr, "[borg8draw] BMP=%p W=%u fmt=%u h=%u xOff=%u v=%u yOff=%u hVis=%u scaleH=%.2f scaleV=%.2f\n",
               BMP, (borg8->dat).Width, (borg8->dat).format,
               (unsigned)h, (unsigned)xOff, (unsigned)v, (unsigned)yOff,
               hVis, (double)imgXScale, (double)imgYScale);
+      fflush(stderr);
       drawLog++;
     }
   }

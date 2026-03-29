@@ -337,6 +337,14 @@ LAB_800b4bc4:
                 else if (param_11 < (posY + (u32)uVar2)) goto LAB_800b4bc4;
                 if ((iVar11 < ((u32)puVar9[bVar10] - iVar14)) &&
                    (iVar15 < (uStack_54 - iVar17))) {
+                  { static int pmDraw = 0;
+                    if (pmDraw < 3) {
+                      fprintf(stderr, "[font] DRAW: char='%c' kern=%u charH=%u iVar11=%d iVar14=%d iVar15=%d iVar17=%d\n",
+                              *pbVar13, (unsigned)puVar9[bVar10], (unsigned)uStack_54,
+                              iVar11, iVar14, iVar15, iVar17);
+                      pmDraw++;
+                    }
+                  }
                   red = (font->col).R;
                   green = (font->col).G;
                   blue = (font->col).B;
@@ -351,6 +359,14 @@ LAB_800b4bc4:
                                             ,red,green,blue,(font->col).A);
                   *gg = pGVar7;
                 }
+              } else {
+                  static int pmSkip = 0;
+                  if (pmSkip < 3) {
+                    fprintf(stderr, "[font] SKIP: char='%c' kern=%u charH=%u iVar11=%d iVar14=%d iVar15=%d iVar17=%d\n",
+                            *pbVar13, puVar9 ? (unsigned)puVar9[bVar10] : 0, (unsigned)uStack_54,
+                            iVar11, iVar14, iVar15, iVar17);
+                    pmSkip++;
+                  }
               }
               iVar11 = iStack_3c + 1;
               posX += iStack_4c;
