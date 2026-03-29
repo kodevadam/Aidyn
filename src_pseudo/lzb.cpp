@@ -88,7 +88,7 @@ LAB_800aa478:
       LZB_CHECK_IN("offset-byte");
       if (0) fprintf(stderr, "[lzb] iter=%u: offset extra byte=0x%02x → iVar7=(%d-3)*256+%u=%d\n",
               iter, compDat[uVar6], iVar7, (u32)compDat[uVar6], (iVar7 + -3) * 0x100 + (s32)(u32)compDat[uVar6]);
-      iVar7 = (iVar7 + -3) * 0x100 + (u32)compDat[uVar6];
+      iVar7 = (iVar7 + -3) * 0x100 + (s32)(s8)compDat[uVar6];
       uVar6++;
       if (iVar7 == -1) {
         *outSize = iVar9;
